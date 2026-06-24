@@ -20,6 +20,10 @@ use super::types::*;
 use crate::config::{Config, TargetConfig};
 use crate::rtt::RttManager;
 
+const RTT_CONTROL_BLOCK_HEADER_BYTES: usize = 16;
+type RttScanRange = (u64, u64);
+type PreparedRttScan = (Option<u64>, Option<Vec<RttScanRange>>);
+
 // Probe-rs imports
 use probe_rs::probe::list::Lister;
 use probe_rs::{CoreStatus, MemoryInterface, Permissions, RegisterValue, Session};
@@ -149,6 +153,21 @@ impl EmbeddedDebuggerToolHandler {
         size: usize,
         required_access: char,
     ) -> Result<(), McpError> {
+        self.ensure_memory_region_allowed_for_target(
+            &session.target_chip,
+            address,
+            size,
+            required_access,
+        )
+    }
+
+    fn ensure_memory_region_allowed_for_target(
+        &self,
+        target_chip: &str,
+        address: u64,
+        size: usize,
+        required_access: char,
+    ) -> Result<(), McpError> {
         let end_exclusive = address.checked_add(size as u64).ok_or_else(|| {
             McpError::internal_error(
                 "Memory range overflows u64 address space.".to_string(),
@@ -160,17 +179,15 @@ impl EmbeddedDebuggerToolHandler {
             return Ok(());
         }
 
-        let target = self
-            .target_config_for(&session.target_chip)
-            .ok_or_else(|| {
-                McpError::internal_error(
-                    format!(
+        let target = self.target_config_for(target_chip).ok_or_else(|| {
+            McpError::internal_error(
+                format!(
                     "Memory access is restricted, but target '{}' has no configured memory map.",
-                    session.target_chip
+                    target_chip
                 ),
-                    None,
-                )
-            })?;
+                None,
+            )
+        })?;
 
         let last_address = end_exclusive - 1;
         let allowed = target.memory_regions.iter().any(|region| {
@@ -185,11 +202,123 @@ impl EmbeddedDebuggerToolHandler {
             Err(McpError::internal_error(
                 format!(
                     "Memory range 0x{address:08X}..0x{last_address:08X} is outside configured '{}' access regions for target '{}'.",
-                    required_access, session.target_chip
+                    required_access, target_chip
                 ),
                 None,
             ))
         }
+    }
+
+    fn prepare_rtt_scan_region(
+        &self,
+        target_chip: &str,
+        control_block_address: Option<u64>,
+        memory_ranges: Option<Vec<RttScanRange>>,
+    ) -> Result<PreparedRttScan, McpError> {
+        let control_block_address = control_block_address.or(self.config.rtt.control_block_address);
+
+        if let Some(address) = control_block_address {
+            self.ensure_memory_region_allowed_for_target(
+                target_chip,
+                address,
+                RTT_CONTROL_BLOCK_HEADER_BYTES,
+                'r',
+            )?;
+            return Ok((Some(address), None));
+        }
+
+        if let Some(ranges) = memory_ranges {
+            self.ensure_rtt_ranges_allowed(target_chip, &ranges)?;
+            return Ok((None, Some(ranges)));
+        }
+
+        if self.config.security.restrict_memory_access {
+            return Ok((None, Some(self.configured_rtt_scan_ranges(target_chip)?)));
+        }
+
+        Ok((None, None))
+    }
+
+    fn ensure_rtt_ranges_allowed(
+        &self,
+        target_chip: &str,
+        ranges: &[RttScanRange],
+    ) -> Result<(), McpError> {
+        if ranges.is_empty() {
+            return Err(McpError::internal_error(
+                "RTT memory ranges must not be empty.".to_string(),
+                None,
+            ));
+        }
+
+        for (start, end) in ranges {
+            let size = end.checked_sub(*start).ok_or_else(|| {
+                McpError::internal_error(
+                    format!(
+                        "RTT memory range 0x{start:08X}..0x{end:08X} has an invalid end address."
+                    ),
+                    None,
+                )
+            })?;
+            if size == 0 {
+                return Err(McpError::internal_error(
+                    format!("RTT memory range 0x{start:08X}..0x{end:08X} is empty."),
+                    None,
+                ));
+            }
+            let size = usize::try_from(size).map_err(|_| {
+                McpError::internal_error(
+                    format!("RTT memory range 0x{start:08X}..0x{end:08X} is too large."),
+                    None,
+                )
+            })?;
+            self.ensure_memory_region_allowed_for_target(target_chip, *start, size, 'r')?;
+        }
+
+        Ok(())
+    }
+
+    fn configured_rtt_scan_ranges(&self, target_chip: &str) -> Result<Vec<RttScanRange>, McpError> {
+        let target = self.target_config_for(target_chip).ok_or_else(|| {
+            McpError::internal_error(
+                format!(
+                    "RTT scan is restricted, but target '{}' has no configured memory map.",
+                    target_chip
+                ),
+                None,
+            )
+        })?;
+
+        let ranges: Result<Vec<_>, _> = target
+            .memory_regions
+            .iter()
+            .filter(|region| region.access.contains('r'))
+            .filter(|region| {
+                !self.config.rtt.scan_ram_only || region.name.to_ascii_lowercase().contains("ram")
+            })
+            .map(|region| {
+                let end_exclusive = region.end.checked_add(1).ok_or_else(|| {
+                    McpError::internal_error(
+                        format!("Memory region '{}' end address overflows.", region.name),
+                        None,
+                    )
+                })?;
+                Ok((region.start, end_exclusive))
+            })
+            .collect();
+
+        let ranges = ranges?;
+        if ranges.is_empty() {
+            return Err(McpError::internal_error(
+                format!(
+                    "RTT scan is restricted, but target '{}' has no readable configured ranges.",
+                    target_chip
+                ),
+                None,
+            ));
+        }
+
+        Ok(ranges)
     }
 
     fn target_config_for(&self, target_chip: &str) -> Option<&TargetConfig> {
@@ -1313,6 +1442,12 @@ impl EmbeddedDebuggerToolHandler {
             None
         };
 
+        let (control_block_address, memory_ranges) = self.prepare_rtt_scan_region(
+            &session_arc.target_chip,
+            control_block_address,
+            memory_ranges,
+        )?;
+
         // Attach RTT
         {
             let mut rtt_manager = session_arc.rtt_manager.lock().await;
@@ -1789,6 +1924,8 @@ impl EmbeddedDebuggerToolHandler {
             "Flash program for session: {}, file: {}",
             args.session_id, args.file_path
         );
+
+        self.ensure_flash_erase_allowed()?;
 
         let session_arc = self.get_session(&args.session_id).await?;
 
@@ -2481,5 +2618,70 @@ impl ServerHandler for EmbeddedDebuggerToolHandler {
     ) -> Result<InitializeResult, McpError> {
         info!("Embedded Debugger MCP server initialized with 22 tools (18 debug + 4 flash)");
         Ok(self.get_info())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn flash_program_rejects_when_erase_permission_disabled() {
+        let handler = EmbeddedDebuggerToolHandler::new(Config::default());
+        let result = handler
+            .flash_program(Parameters(FlashProgramArgs {
+                session_id: "missing-session".to_string(),
+                file_path: "firmware.elf".to_string(),
+                format: "auto".to_string(),
+                base_address: None,
+                verify: true,
+            }))
+            .await;
+
+        let error = format!("{:?}", result.expect_err("flash program must fail closed"));
+        assert!(error.contains("Flash erase is disabled"));
+    }
+
+    #[test]
+    fn restricted_rtt_exact_address_uses_target_memory_map() {
+        let mut config = Config::default();
+        config.security.restrict_memory_access = true;
+        let handler = EmbeddedDebuggerToolHandler::new(config);
+
+        assert!(handler
+            .prepare_rtt_scan_region("STM32F407VGTx", Some(0x2000_0000), None)
+            .is_ok());
+        assert!(handler
+            .prepare_rtt_scan_region("STM32F407VGTx", Some(0x4000_0000), None)
+            .is_err());
+    }
+
+    #[test]
+    fn restricted_rtt_ranges_must_stay_inside_readable_regions() {
+        let mut config = Config::default();
+        config.security.restrict_memory_access = true;
+        let handler = EmbeddedDebuggerToolHandler::new(config);
+
+        assert!(handler
+            .prepare_rtt_scan_region(
+                "STM32F407VGTx",
+                None,
+                Some(vec![(0x2000_0000, 0x2000_0100)])
+            )
+            .is_ok());
+        assert!(handler
+            .prepare_rtt_scan_region(
+                "STM32F407VGTx",
+                None,
+                Some(vec![(0x2002_FF00, 0x2003_0100)])
+            )
+            .is_err());
+        assert!(handler
+            .prepare_rtt_scan_region(
+                "STM32F407VGTx",
+                None,
+                Some(vec![(0x2000_0000, 0x2000_0000)])
+            )
+            .is_err());
     }
 }

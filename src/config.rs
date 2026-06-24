@@ -17,40 +17,40 @@ pub struct Args {
     pub config: Option<PathBuf>,
 
     /// Log level (error, warn, info, debug, trace)
-    #[arg(long, default_value = "info")]
-    pub log_level: String,
+    #[arg(long)]
+    pub log_level: Option<String>,
 
     /// Log file path
     #[arg(long)]
     pub log_file: Option<PathBuf>,
 
     /// Maximum number of concurrent debug sessions
-    #[arg(long, default_value = "5")]
-    pub max_sessions: usize,
+    #[arg(long)]
+    pub max_sessions: Option<usize>,
 
     /// Session timeout in seconds
-    #[arg(long, default_value = "3600")]
-    pub session_timeout: u64,
+    #[arg(long)]
+    pub session_timeout: Option<u64>,
 
     /// Default debugger speed in kHz
-    #[arg(long, default_value = "4000")]
-    pub default_speed: u32,
+    #[arg(long)]
+    pub default_speed: Option<u32>,
 
     /// Connection timeout in milliseconds
-    #[arg(long, default_value = "5000")]
-    pub connection_timeout: u64,
+    #[arg(long)]
+    pub connection_timeout: Option<u64>,
 
     /// Connection retry count
-    #[arg(long, default_value = "3")]
-    pub retry_count: u32,
+    #[arg(long)]
+    pub retry_count: Option<u32>,
 
     /// RTT buffer size in bytes
-    #[arg(long, default_value = "1024")]
-    pub rtt_buffer_size: usize,
+    #[arg(long)]
+    pub rtt_buffer_size: Option<usize>,
 
     /// RTT poll interval in milliseconds
-    #[arg(long, default_value = "10")]
-    pub rtt_poll_interval: u64,
+    #[arg(long)]
+    pub rtt_poll_interval: Option<u64>,
 
     /// Allow flash erase operations
     #[arg(long)]
@@ -180,17 +180,39 @@ impl Config {
 
     /// Merge command line arguments into configuration
     pub fn merge_args(&mut self, args: &Args) {
-        self.server.max_sessions = args.max_sessions;
-        self.server.session_timeout_seconds = args.session_timeout;
-        self.debugger.default_speed_khz = args.default_speed;
-        self.debugger.connection_timeout_ms = args.connection_timeout;
-        self.debugger.retry_count = args.retry_count;
-        self.rtt.buffer_size = args.rtt_buffer_size;
-        self.rtt.poll_interval_ms = args.rtt_poll_interval;
-        self.security.allow_flash_erase = args.allow_flash_erase;
-        self.security.restrict_memory_access = args.restrict_memory_access;
-        self.logging.level = args.log_level.clone();
-        self.logging.file = args.log_file.clone();
+        if let Some(max_sessions) = args.max_sessions {
+            self.server.max_sessions = max_sessions;
+        }
+        if let Some(session_timeout) = args.session_timeout {
+            self.server.session_timeout_seconds = session_timeout;
+        }
+        if let Some(default_speed) = args.default_speed {
+            self.debugger.default_speed_khz = default_speed;
+        }
+        if let Some(connection_timeout) = args.connection_timeout {
+            self.debugger.connection_timeout_ms = connection_timeout;
+        }
+        if let Some(retry_count) = args.retry_count {
+            self.debugger.retry_count = retry_count;
+        }
+        if let Some(rtt_buffer_size) = args.rtt_buffer_size {
+            self.rtt.buffer_size = rtt_buffer_size;
+        }
+        if let Some(rtt_poll_interval) = args.rtt_poll_interval {
+            self.rtt.poll_interval_ms = rtt_poll_interval;
+        }
+        if args.allow_flash_erase {
+            self.security.allow_flash_erase = true;
+        }
+        if args.restrict_memory_access {
+            self.security.restrict_memory_access = true;
+        }
+        if let Some(log_level) = &args.log_level {
+            self.logging.level = log_level.clone();
+        }
+        if let Some(log_file) = &args.log_file {
+            self.logging.file = Some(log_file.clone());
+        }
     }
 
     /// Validate configuration

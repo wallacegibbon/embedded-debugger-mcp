@@ -35,20 +35,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    // Initialize logging
-    init_logging(&args)?;
-
-    info!(
-        "Starting Debugger MCP Server v{}",
-        env!("CARGO_PKG_VERSION")
-    );
-    debug!("Command line args: {:?}", args);
-
     // Load configuration
-    let mut config = Config::load(args.config.as_ref()).map_err(|e| {
-        error!("Failed to load configuration: {}", e);
-        e
-    })?;
+    let mut config = Config::load(args.config.as_ref())?;
 
     // Merge command line arguments into configuration
     config.merge_args(&args);
@@ -65,10 +53,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Validate final configuration
-    config.validate().map_err(|e| {
-        error!("Configuration validation failed: {}", e);
-        e
-    })?;
+    config.validate()?;
+
+    // Initialize logging after config merge so file config is not overwritten by CLI defaults.
+    init_logging(&config)?;
+
+    info!(
+        "Starting Debugger MCP Server v{}",
+        env!("CARGO_PKG_VERSION")
+    );
+    debug!("Command line args: {:?}", args);
 
     info!("Configuration loaded and validated successfully");
 
@@ -206,9 +200,9 @@ fn command_output(command: &str, args: &[&str]) -> Option<String> {
 }
 
 /// Initialize logging system
-fn init_logging(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
+fn init_logging(config: &Config) -> Result<(), Box<dyn std::error::Error>> {
     let env_filter =
-        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&args.log_level));
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&config.logging.level));
 
     let subscriber = fmt::Subscriber::builder()
         .with_env_filter(env_filter)
@@ -218,7 +212,7 @@ fn init_logging(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
         .with_line_number(false);
 
     // Configure output destination
-    if let Some(log_file) = &args.log_file {
+    if let Some(log_file) = &config.logging.file {
         let file = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
@@ -226,12 +220,12 @@ fn init_logging(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
 
         subscriber.with_writer(file).init();
 
-        println!("Logging to file: {}", log_file.display());
+        eprintln!("Logging to file: {}", log_file.display());
     } else {
         subscriber.with_writer(std::io::stderr).init();
     }
 
-    debug!("Logging initialized with level: {}", args.log_level);
+    debug!("Logging initialized with level: {}", config.logging.level);
     Ok(())
 }
 
@@ -249,8 +243,8 @@ mod tests {
             "10",
         ]);
 
-        assert_eq!(args.log_level, "debug");
-        assert_eq!(args.max_sessions, 10);
+        assert_eq!(args.log_level.as_deref(), Some("debug"));
+        assert_eq!(args.max_sessions, Some(10));
         assert!(args.command.is_none());
     }
 

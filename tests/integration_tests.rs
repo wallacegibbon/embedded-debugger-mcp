@@ -1,5 +1,7 @@
 //! Integration tests for debugger MCP server
 
+use clap::Parser;
+use embedded_debugger_mcp::config::Args;
 use embedded_debugger_mcp::Config;
 
 #[tokio::test]
@@ -25,6 +27,44 @@ async fn test_probe_discovery() {
     // The result might be empty if no probes are connected, which is fine
     let probes = result.unwrap();
     println!("Found {} probes", probes.len());
+}
+
+#[test]
+fn test_cli_defaults_do_not_override_config_file_values() {
+    let mut config = Config::default();
+    config.server.max_sessions = 9;
+    config.debugger.default_speed_khz = 1200;
+    config.security.allow_flash_erase = true;
+    config.security.restrict_memory_access = true;
+
+    let args = Args::parse_from(["embedded-debugger-mcp"]);
+    config.merge_args(&args);
+
+    assert_eq!(config.server.max_sessions, 9);
+    assert_eq!(config.debugger.default_speed_khz, 1200);
+    assert!(config.security.allow_flash_erase);
+    assert!(config.security.restrict_memory_access);
+}
+
+#[test]
+fn test_cli_explicit_values_override_config_file_values() {
+    let mut config = Config::default();
+    let args = Args::parse_from([
+        "embedded-debugger-mcp",
+        "--max-sessions",
+        "10",
+        "--default-speed",
+        "1600",
+        "--allow-flash-erase",
+        "--restrict-memory-access",
+    ]);
+
+    config.merge_args(&args);
+
+    assert_eq!(config.server.max_sessions, 10);
+    assert_eq!(config.debugger.default_speed_khz, 1600);
+    assert!(config.security.allow_flash_erase);
+    assert!(config.security.restrict_memory_access);
 }
 
 #[test]

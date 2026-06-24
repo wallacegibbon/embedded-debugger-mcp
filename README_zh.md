@@ -190,7 +190,7 @@ cargo clippy --locked --all-targets --all-features -- -D warnings
 cargo test --locked --all-targets --all-features
 RUSTDOCFLAGS="-D warnings" cargo doc --locked --all-features --no-deps
 cargo package --locked
-python3 /Users/adan/.codex/skills/.system/skill-creator/scripts/quick_validate.py skills/embedded-debugger
+python3 .github/scripts/validate_skill.py skills/embedded-debugger
 (cd examples/STM32_demo && CARGO_TARGET_DIR=/tmp/embedded-debugger-mcp-stm32-target cargo +nightly check --locked)
 ```
 

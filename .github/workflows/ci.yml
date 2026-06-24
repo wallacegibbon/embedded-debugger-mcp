@@ -35,6 +35,20 @@ jobs:
       - name: Package
         run: cargo package --locked
 
+      - name: CLI smoke
+        run: |
+          cargo run --locked -- --help > /tmp/embedded-debugger-help.txt
+          cargo run --locked -- doctor --json > /tmp/embedded-debugger-doctor.json
+          python3 -m json.tool /tmp/embedded-debugger-doctor.json > /dev/null
+          cargo run --locked -- probes list --json > /tmp/embedded-debugger-probes.json
+          python3 -m json.tool /tmp/embedded-debugger-probes.json > /dev/null
+          cargo run --locked -- skill print-prompt > /tmp/embedded-debugger-skill.txt
+          grep -q "embedded-debugger skill" /tmp/embedded-debugger-skill.txt
+          if cargo run --locked -- not-a-command > /tmp/embedded-debugger-invalid.out 2> /tmp/embedded-debugger-invalid.err; then
+            echo "invalid subcommand unexpectedly succeeded"
+            exit 1
+          fi
+
       - name: Validate bundled skill
         run: python3 .github/scripts/validate_skill.py skills/embedded-debugger
 
