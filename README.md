@@ -94,6 +94,7 @@ embedded-debugger-mcp config generate
 embedded-debugger-mcp config validate
 embedded-debugger-mcp config show
 embedded-debugger-mcp skill print-prompt
+embedded-debugger-mcp skill install --target both
 ```
 
 The bundled skill lives in:
@@ -106,28 +107,39 @@ It is written as a plain Codex skill and is also packaged for Claude Code with
 `.claude-plugin/plugin.json`. The skill starts with CLI checks and uses MCP
 tools only when an MCP client is available.
 
-Install the skill for Codex:
+Install the skill for Codex and Claude Code:
 
 ```bash
-mkdir -p ~/.codex/skills
-cp -R skills/embedded-debugger ~/.codex/skills/
+embedded-debugger-mcp skill install --target both
 ```
 
-Then trigger it with a prompt such as:
+Preview or automate the install with JSON:
+
+```bash
+embedded-debugger-mcp skill install --target both --dry-run --json
+embedded-debugger-mcp skill install --target both --force --json
+```
+
+`--target` accepts `codex`, `claude`, or `both`. The command installs the Codex
+skill under `~/.codex/skills/embedded-debugger`, the Claude Code skill under
+`~/.claude/skills/embedded-debugger`, and a local Claude plugin-dir package under
+`~/.claude/plugins/local/embedded-debugger-mcp`. Existing directories are not
+replaced unless `--force` is passed.
+
+Trigger the Codex skill with a prompt such as:
 
 ```text
 Use $embedded-debugger to inspect my embedded target setup.
 ```
 
-Load it in Claude Code from this checkout:
+Load the installed Claude Code plugin package:
 
 ```bash
-claude --plugin-dir . --print '/embedded-debugger inspect my embedded target setup'
+claude --plugin-dir ~/.claude/plugins/local/embedded-debugger-mcp --print '/embedded-debugger inspect my embedded target setup'
 ```
 
 For skill-only environments, the same `skills/embedded-debugger` directory can
-also be copied to a local skills directory. The plugin-dir path above is the
-validated Claude Code slash-command path for this repository.
+also be copied to a local skills directory.
 
 Validate the skill package:
 
@@ -135,6 +147,7 @@ Validate the skill package:
 python3 .github/scripts/validate_skill.py skills/embedded-debugger
 python3 ~/.codex/skills/.system/skill-creator/scripts/quick_validate.py skills/embedded-debugger
 claude plugin validate .
+embedded-debugger-mcp skill install --target both --home /tmp/embedded-debugger-skill-home --force --json
 ```
 
 The first command validates the repository skill metadata, the second validates
@@ -236,6 +249,7 @@ RUSTDOCFLAGS="-D warnings" cargo doc --locked --all-features --no-deps
 cargo package --locked
 python3 .github/scripts/validate_skill.py skills/embedded-debugger
 claude plugin validate .
+embedded-debugger-mcp skill install --target both --home /tmp/embedded-debugger-skill-home --force --json
 (cd examples/STM32_demo && CARGO_TARGET_DIR=/tmp/embedded-debugger-mcp-stm32-target cargo +nightly check --locked)
 ```
 

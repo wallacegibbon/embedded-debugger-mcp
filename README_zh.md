@@ -90,6 +90,7 @@ embedded-debugger-mcp config generate
 embedded-debugger-mcp config validate
 embedded-debugger-mcp config show
 embedded-debugger-mcp skill print-prompt
+embedded-debugger-mcp skill install --target both
 ```
 
 内置 skill 位于:
@@ -102,27 +103,39 @@ skills/embedded-debugger/
 插件加载方式。工作流会先运行 CLI 检查；只有 MCP 客户端可用时，才会使用 MCP
 工具做会话型调试操作。
 
-安装到 Codex:
+安装到 Codex 和 Claude Code:
 
 ```bash
-mkdir -p ~/.codex/skills
-cp -R skills/embedded-debugger ~/.codex/skills/
+embedded-debugger-mcp skill install --target both
 ```
 
-然后用类似这样的 prompt 触发:
+可以先预览，也可以用 JSON 做自动化:
+
+```bash
+embedded-debugger-mcp skill install --target both --dry-run --json
+embedded-debugger-mcp skill install --target both --force --json
+```
+
+`--target` 支持 `codex`、`claude` 或 `both`。该命令会把 Codex skill 安装到
+`~/.codex/skills/embedded-debugger`，把 Claude Code skill 安装到
+`~/.claude/skills/embedded-debugger`，并把可通过 `--plugin-dir` 加载的 Claude
+plugin 包安装到 `~/.claude/plugins/local/embedded-debugger-mcp`。已有目录默认不会
+覆盖，需要显式传入 `--force`。
+
+Codex 里可以用类似这样的 prompt 触发:
 
 ```text
 Use $embedded-debugger to inspect my embedded target setup.
 ```
 
-从当前 checkout 加载到 Claude Code:
+从已安装的 Claude Code plugin 包加载:
 
 ```bash
-claude --plugin-dir . --print '/embedded-debugger inspect my embedded target setup'
+claude --plugin-dir ~/.claude/plugins/local/embedded-debugger-mcp --print '/embedded-debugger inspect my embedded target setup'
 ```
 
 对于只支持 skill 目录的环境，也可以直接复制 `skills/embedded-debugger` 到本地
-skills 目录。上面的 plugin-dir 方式是本仓库已验证的 Claude Code 斜杠命令路径。
+skills 目录。
 
 验证 skill 包:
 
@@ -130,6 +143,7 @@ skills 目录。上面的 plugin-dir 方式是本仓库已验证的 Claude Code 
 python3 .github/scripts/validate_skill.py skills/embedded-debugger
 python3 ~/.codex/skills/.system/skill-creator/scripts/quick_validate.py skills/embedded-debugger
 claude plugin validate .
+embedded-debugger-mcp skill install --target both --home /tmp/embedded-debugger-skill-home --force --json
 ```
 
 第一个命令验证仓库内 skill 元数据，第二个命令在已安装 Codex skill creator
@@ -226,6 +240,7 @@ RUSTDOCFLAGS="-D warnings" cargo doc --locked --all-features --no-deps
 cargo package --locked
 python3 .github/scripts/validate_skill.py skills/embedded-debugger
 claude plugin validate .
+embedded-debugger-mcp skill install --target both --home /tmp/embedded-debugger-skill-home --force --json
 (cd examples/STM32_demo && CARGO_TARGET_DIR=/tmp/embedded-debugger-mcp-stm32-target cargo +nightly check --locked)
 ```
 

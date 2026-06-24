@@ -1,7 +1,7 @@
 //! Configuration management for the debugger MCP server
 
 use crate::error::{DebugError, Result};
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -132,6 +132,39 @@ pub enum ProbeCommand {
 pub enum SkillCommand {
     /// Print the default prompt for CLI+Skill workflows.
     PrintPrompt,
+    /// Install the bundled skill for Codex and/or Claude Code.
+    Install {
+        /// Which assistant target to install for.
+        #[arg(long, value_enum, default_value = "both")]
+        target: SkillInstallTarget,
+
+        /// Override the user home directory used for installation.
+        #[arg(long)]
+        home: Option<PathBuf>,
+
+        /// Print planned writes without changing the filesystem.
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Replace existing installed skill/plugin directories.
+        #[arg(long)]
+        force: bool,
+
+        /// Emit machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+/// Supported skill installation targets.
+#[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SkillInstallTarget {
+    /// Install the Codex skill under ~/.codex/skills.
+    Codex,
+    /// Install Claude Code skill and local plugin-dir package under ~/.claude.
+    Claude,
+    /// Install both Codex and Claude Code targets.
+    Both,
 }
 
 /// Main configuration structure

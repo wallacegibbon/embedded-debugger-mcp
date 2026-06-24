@@ -12,9 +12,9 @@ use tracing::{debug, error, info};
 use tracing_subscriber::{fmt, EnvFilter};
 
 use embedded_debugger_mcp::{config::Args, tools::EmbeddedDebuggerToolHandler, Config};
+use skill_installer::{install_skill_bundle, DEFAULT_SKILL_PROMPT};
 
-const DEFAULT_SKILL_PROMPT: &str =
-    include_str!("../skills/embedded-debugger/references/default-prompt.md");
+mod skill_installer;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -133,12 +133,27 @@ async fn run_cli_command(
             }
             Ok(())
         }
-        CliCommand::Skill {
-            action: SkillCommand::PrintPrompt,
-        } => {
-            print!("{}", DEFAULT_SKILL_PROMPT);
-            Ok(())
-        }
+        CliCommand::Skill { action } => match action {
+            SkillCommand::PrintPrompt => {
+                print!("{}", DEFAULT_SKILL_PROMPT);
+                Ok(())
+            }
+            SkillCommand::Install {
+                target,
+                home,
+                dry_run,
+                force,
+                json,
+            } => {
+                let report = install_skill_bundle(target, home, dry_run, force)?;
+                if json {
+                    println!("{}", serde_json::to_string_pretty(&report)?);
+                } else {
+                    report.print_text();
+                }
+                Ok(())
+            }
+        },
     }
 }
 
@@ -232,6 +247,7 @@ fn init_logging(config: &Config) -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use embedded_debugger_mcp::config::SkillInstallTarget;
 
     #[test]
     fn test_args_parsing() {
@@ -255,6 +271,31 @@ mod tests {
             args.command,
             Some(CliCommand::Probes {
                 action: ProbeCommand::List { json: true }
+            })
+        );
+    }
+
+    #[test]
+    fn test_skill_install_subcommand_parsing() {
+        let args = Args::parse_from([
+            "embedded-debugger-mcp",
+            "skill",
+            "install",
+            "--target",
+            "codex",
+            "--dry-run",
+            "--json",
+        ]);
+        assert_eq!(
+            args.command,
+            Some(CliCommand::Skill {
+                action: SkillCommand::Install {
+                    target: SkillInstallTarget::Codex,
+                    home: None,
+                    dry_run: true,
+                    force: false,
+                    json: true,
+                }
             })
         );
     }

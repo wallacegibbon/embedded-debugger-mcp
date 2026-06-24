@@ -44,6 +44,13 @@ jobs:
           python3 -m json.tool /tmp/embedded-debugger-probes.json > /dev/null
           cargo run --locked -- skill print-prompt > /tmp/embedded-debugger-skill.txt
           grep -q "embedded-debugger skill" /tmp/embedded-debugger-skill.txt
+          cargo run --locked -- skill install --target both --home /tmp/embedded-debugger-skill-home --dry-run --json > /tmp/embedded-debugger-skill-install-dry-run.json
+          python3 -m json.tool /tmp/embedded-debugger-skill-install-dry-run.json > /dev/null
+          cargo run --locked -- skill install --target both --home /tmp/embedded-debugger-skill-home --force --json > /tmp/embedded-debugger-skill-install.json
+          python3 -m json.tool /tmp/embedded-debugger-skill-install.json > /dev/null
+          test -f /tmp/embedded-debugger-skill-home/.codex/skills/embedded-debugger/SKILL.md
+          test -f /tmp/embedded-debugger-skill-home/.claude/skills/embedded-debugger/SKILL.md
+          test -f /tmp/embedded-debugger-skill-home/.claude/plugins/local/embedded-debugger-mcp/.claude-plugin/plugin.json
           if cargo run --locked -- not-a-command > /tmp/embedded-debugger-invalid.out 2> /tmp/embedded-debugger-invalid.err; then
             echo "invalid subcommand unexpectedly succeeded"
             exit 1
