@@ -12,34 +12,55 @@ const RTT_SYMBOL_NAME: &str = "_SEGGER_RTT";
 /// This is the primary method used by probe-rs for RTT detection
 pub fn get_rtt_symbol_from_elf(elf_path: &Path) -> Result<u64> {
     debug!("Parsing ELF file for RTT symbol: {}", elf_path.display());
-    
+
     // Read ELF file
     let elf_data = std::fs::read(elf_path).map_err(|e| {
-        DebugError::RttError(format!("Failed to read ELF file {}: {}", elf_path.display(), e))
+        DebugError::RttError(format!(
+            "Failed to read ELF file {}: {}",
+            elf_path.display(),
+            e
+        ))
     })?;
-    
+
     // Parse ELF structure
     let elf = goblin::elf::Elf::parse(&elf_data).map_err(|e| {
-        DebugError::RttError(format!("Failed to parse ELF file {}: {}", elf_path.display(), e))
+        DebugError::RttError(format!(
+            "Failed to parse ELF file {}: {}",
+            elf_path.display(),
+            e
+        ))
     })?;
-    
-    info!("ELF file parsed successfully, searching for {} symbol", RTT_SYMBOL_NAME);
-    debug!("ELF info - entry: 0x{:08X}, symbols: {}", elf.entry, elf.syms.len());
-    
+
+    info!(
+        "ELF file parsed successfully, searching for {} symbol",
+        RTT_SYMBOL_NAME
+    );
+    debug!(
+        "ELF info - entry: 0x{:08X}, symbols: {}",
+        elf.entry,
+        elf.syms.len()
+    );
+
     // Search for _SEGGER_RTT symbol in symbol table
     for sym in elf.syms.iter() {
         if let Some(name) = elf.strtab.get_at(sym.st_name) {
             debug!("Found symbol: {} at 0x{:08X}", name, sym.st_value);
-            
+
             if name == RTT_SYMBOL_NAME {
                 let rtt_address = sym.st_value;
-                info!("✅ Found {} symbol at address 0x{:08X}", RTT_SYMBOL_NAME, rtt_address);
-                
+                info!(
+                    "Found {} symbol at address 0x{:08X}",
+                    RTT_SYMBOL_NAME, rtt_address
+                );
+
                 // Validate address is reasonable (should be in RAM)
                 if is_valid_rtt_address(rtt_address) {
                     return Ok(rtt_address);
                 } else {
-                    warn!("RTT symbol address 0x{:08X} appears invalid (not in typical RAM range)", rtt_address);
+                    warn!(
+                        "RTT symbol address 0x{:08X} appears invalid (not in typical RAM range)",
+                        rtt_address
+                    );
                     return Err(DebugError::RttError(format!(
                         "RTT symbol found at invalid address 0x{:08X} (expected in RAM range 0x20000000-0x2FFFFFFF)", 
                         rtt_address
@@ -48,12 +69,16 @@ pub fn get_rtt_symbol_from_elf(elf_path: &Path) -> Result<u64> {
             }
         }
     }
-    
+
     // Symbol not found
-    debug!("RTT symbol search completed, {} not found in {} symbols", RTT_SYMBOL_NAME, elf.syms.len());
+    debug!(
+        "RTT symbol search completed, {} not found in {} symbols",
+        RTT_SYMBOL_NAME,
+        elf.syms.len()
+    );
     Err(DebugError::RttError(format!(
         "{} symbol not found in ELF file {}. Firmware may not have RTT enabled or symbols may be stripped.", 
-        RTT_SYMBOL_NAME, 
+        RTT_SYMBOL_NAME,
         elf_path.display()
     )))
 }
@@ -66,20 +91,18 @@ fn is_valid_rtt_address(address: u64) -> bool {
     // But allow broader range for different MCUs
     const RAM_START: u64 = 0x20000000;
     const RAM_END: u64 = 0x2FFFFFFF;
-    
-    address >= RAM_START && address <= RAM_END
+
+    (RAM_START..=RAM_END).contains(&address)
 }
 
-/// Get comprehensive ELF information for debugging
+/// Get ELF information used for RTT debugging
 pub fn get_elf_debug_info(elf_path: &Path) -> Result<ElfDebugInfo> {
-    let elf_data = std::fs::read(elf_path).map_err(|e| {
-        DebugError::RttError(format!("Failed to read ELF file: {}", e))
-    })?;
-    
-    let elf = goblin::elf::Elf::parse(&elf_data).map_err(|e| {
-        DebugError::RttError(format!("Failed to parse ELF file: {}", e))
-    })?;
-    
+    let elf_data = std::fs::read(elf_path)
+        .map_err(|e| DebugError::RttError(format!("Failed to read ELF file: {}", e)))?;
+
+    let elf = goblin::elf::Elf::parse(&elf_data)
+        .map_err(|e| DebugError::RttError(format!("Failed to parse ELF file: {}", e)))?;
+
     let mut debug_symbols = Vec::new();
     for sym in elf.syms.iter() {
         if let Some(name) = elf.strtab.get_at(sym.st_name) {
@@ -92,7 +115,7 @@ pub fn get_elf_debug_info(elf_path: &Path) -> Result<ElfDebugInfo> {
             }
         }
     }
-    
+
     Ok(ElfDebugInfo {
         entry_point: elf.entry,
         symbol_count: elf.syms.len(),
@@ -119,14 +142,14 @@ pub struct SymbolInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_valid_rtt_address() {
         // Valid STM32G4 RAM addresses
         assert!(is_valid_rtt_address(0x20000000)); // Start of SRAM1
         assert!(is_valid_rtt_address(0x20008000)); // Start of SRAM2
         assert!(is_valid_rtt_address(0x2000A000)); // End of SRAM2
-        
+
         // Invalid addresses
         assert!(!is_valid_rtt_address(0x08000000)); // Flash
         assert!(!is_valid_rtt_address(0x00000000)); // Null

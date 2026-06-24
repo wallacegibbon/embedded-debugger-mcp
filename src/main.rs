@@ -1,15 +1,20 @@
 //! Embedded Debugger MCP Server - Main Entry Point
 
 use clap::Parser;
-use tracing::{info, error, debug};
-use tracing_subscriber::{EnvFilter, fmt};
-use rmcp::{ServiceExt, transport::stdio};
-
-use embedded_debugger_mcp::{
-    Config,
-    config::Args,
-    tools::EmbeddedDebuggerToolHandler,
+use embedded_debugger_mcp::config::{
+    Command as CliCommand, ConfigCommand, ProbeCommand, SkillCommand,
 };
+use embedded_debugger_mcp::debugger::discovery::ProbeDiscovery;
+use rmcp::{transport::stdio, ServiceExt};
+use serde::Serialize;
+use std::process::Command as ProcessCommand;
+use tracing::{debug, error, info};
+use tracing_subscriber::{fmt, EnvFilter};
+
+use embedded_debugger_mcp::{config::Args, tools::EmbeddedDebuggerToolHandler, Config};
+
+const DEFAULT_SKILL_PROMPT: &str =
+    include_str!("../skills/embedded-debugger/references/default-prompt.md");
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -17,7 +22,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
     // Handle special flags first
-    if args.generate_config {
+    if args.generate_config
+        || matches!(
+            args.command,
+            Some(CliCommand::Config {
+                action: ConfigCommand::Generate
+            })
+        )
+    {
         let config = Config::default();
         println!("{}", config.to_toml()?);
         return Ok(());
@@ -26,15 +38,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize logging
     init_logging(&args)?;
 
-    info!("Starting Debugger MCP Server v{}", env!("CARGO_PKG_VERSION"));
+    info!(
+        "Starting Debugger MCP Server v{}",
+        env!("CARGO_PKG_VERSION")
+    );
     debug!("Command line args: {:?}", args);
 
     // Load configuration
-    let mut config = Config::load(args.config.as_ref())
-        .map_err(|e| {
-            error!("Failed to load configuration: {}", e);
-            e
-        })?;
+    let mut config = Config::load(args.config.as_ref()).map_err(|e| {
+        error!("Failed to load configuration: {}", e);
+        e
+    })?;
 
     // Merge command line arguments into configuration
     config.merge_args(&args);
@@ -51,22 +65,100 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Validate final configuration
-    config.validate()
-        .map_err(|e| {
-            error!("Configuration validation failed: {}", e);
-            e
-        })?;
+    config.validate().map_err(|e| {
+        error!("Configuration validation failed: {}", e);
+        e
+    })?;
 
     info!("Configuration loaded and validated successfully");
 
+    if let Some(command) = args.command.clone() {
+        return run_cli_command(command, config).await;
+    }
+
+    run_mcp_server(config).await
+}
+
+async fn run_cli_command(
+    command: CliCommand,
+    config: Config,
+) -> Result<(), Box<dyn std::error::Error>> {
+    match command {
+        CliCommand::Serve => run_mcp_server(config).await,
+        CliCommand::Config { action } => {
+            match action {
+                ConfigCommand::Generate => println!("{}", Config::default().to_toml()?),
+                ConfigCommand::Validate => println!("Configuration is valid"),
+                ConfigCommand::Show => println!("{}", config.to_toml()?),
+            }
+            Ok(())
+        }
+        CliCommand::Probes {
+            action: ProbeCommand::List { json },
+        } => {
+            let probes = ProbeDiscovery::list_probes()?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&probes)?);
+            } else if probes.is_empty() {
+                println!("No debug probes found");
+            } else {
+                for (index, probe) in probes.iter().enumerate() {
+                    println!(
+                        "{}. {} ({:04X}:{:04X}) {}",
+                        index + 1,
+                        probe.identifier,
+                        probe.vendor_id,
+                        probe.product_id,
+                        probe.serial_number.as_deref().unwrap_or("no serial")
+                    );
+                }
+            }
+            Ok(())
+        }
+        CliCommand::Doctor { json } => {
+            let report = DoctorReport::collect(&config);
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                println!("embedded-debugger-mcp doctor");
+                println!("version: {}", report.version);
+                println!(
+                    "rustc: {}",
+                    report.rustc_version.as_deref().unwrap_or("not found")
+                );
+                println!("config_valid: {}", report.config_valid);
+                if let Some(error) = &report.config_error {
+                    println!("config_error: {}", error);
+                }
+                println!("probe_count: {}", report.probe_count.unwrap_or(0));
+                if let Some(error) = &report.probe_error {
+                    println!("probe_error: {}", error);
+                }
+                println!("mcp_mode: use `embedded-debugger-mcp serve`");
+                println!("cli_skill_mode: use `embedded-debugger-mcp skill print-prompt`");
+            }
+            Ok(())
+        }
+        CliCommand::Skill {
+            action: SkillCommand::PrintPrompt,
+        } => {
+            print!("{}", DEFAULT_SKILL_PROMPT);
+            Ok(())
+        }
+    }
+}
+
+async fn run_mcp_server(config: Config) -> Result<(), Box<dyn std::error::Error>> {
     // Create and serve the handler using rust-sdk standard pattern
-    let service = EmbeddedDebuggerToolHandler::new(config.server.max_sessions)
-        .serve(stdio()).await.inspect_err(|e| {
+    let service = EmbeddedDebuggerToolHandler::new(config)
+        .serve(stdio())
+        .await
+        .inspect_err(|e| {
             error!("Serving error: {:?}", e);
         })?;
-    
+
     info!("Embedded Debugger MCP Server started successfully");
-    
+
     // Wait for the service to complete
     service.waiting().await?;
 
@@ -77,10 +169,46 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+#[derive(Debug, Serialize)]
+struct DoctorReport {
+    version: &'static str,
+    rustc_version: Option<String>,
+    config_valid: bool,
+    config_error: Option<String>,
+    probe_count: Option<usize>,
+    probe_error: Option<String>,
+}
+
+impl DoctorReport {
+    fn collect(config: &Config) -> Self {
+        let config_result = config.validate();
+        let probe_result = ProbeDiscovery::list_probes();
+
+        Self {
+            version: env!("CARGO_PKG_VERSION"),
+            rustc_version: command_output("rustc", &["--version"]),
+            config_valid: config_result.is_ok(),
+            config_error: config_result.err().map(|error| error.to_string()),
+            probe_count: probe_result.as_ref().ok().map(Vec::len),
+            probe_error: probe_result.err().map(|error| error.to_string()),
+        }
+    }
+}
+
+fn command_output(command: &str, args: &[&str]) -> Option<String> {
+    let output = ProcessCommand::new(command).args(args).output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    let stdout = String::from_utf8(output.stdout).ok()?;
+    Some(stdout.trim().to_string())
+}
+
 /// Initialize logging system
 fn init_logging(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
-    let env_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(&args.log_level));
+    let env_filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&args.log_level));
 
     let subscriber = fmt::Subscriber::builder()
         .with_env_filter(env_filter)
@@ -95,22 +223,17 @@ fn init_logging(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
             .create(true)
             .append(true)
             .open(log_file)?;
-        
-        subscriber
-            .with_writer(file)
-            .init();
-        
+
+        subscriber.with_writer(file).init();
+
         println!("Logging to file: {}", log_file.display());
     } else {
-        subscriber
-            .with_writer(std::io::stderr)
-            .init();
+        subscriber.with_writer(std::io::stderr).init();
     }
 
     debug!("Logging initialized with level: {}", args.log_level);
     Ok(())
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -118,14 +241,28 @@ mod tests {
 
     #[test]
     fn test_args_parsing() {
-        let args = Args::parse_from(&[
-            "debugger-mcp-rs",
-            "--log-level", "debug",
-            "--max-sessions", "10",
+        let args = Args::parse_from([
+            "embedded-debugger-mcp",
+            "--log-level",
+            "debug",
+            "--max-sessions",
+            "10",
         ]);
-        
+
         assert_eq!(args.log_level, "debug");
         assert_eq!(args.max_sessions, 10);
+        assert!(args.command.is_none());
+    }
+
+    #[test]
+    fn test_subcommand_parsing() {
+        let args = Args::parse_from(["embedded-debugger-mcp", "probes", "list", "--json"]);
+        assert_eq!(
+            args.command,
+            Some(CliCommand::Probes {
+                action: ProbeCommand::List { json: true }
+            })
+        );
     }
 
     #[test]
@@ -135,5 +272,4 @@ mod tests {
         assert_eq!(config.server.max_sessions, 5);
         assert_eq!(config.debugger.default_speed_khz, 4000);
     }
-
 }

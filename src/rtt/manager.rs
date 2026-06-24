@@ -1,12 +1,15 @@
 //! RTT manager implementation using probe-rs RTT API
 
 use crate::error::{DebugError, Result};
+use probe_rs::{
+    rtt::{Rtt, ScanRegion},
+    MemoryInterface, Session,
+};
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::path::Path;
+use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{debug, info, error, warn};
-use probe_rs::{Session, rtt::{Rtt, ScanRegion}, MemoryInterface};
+use tracing::{debug, error, info, warn};
 
 /// RTT manager for hardware communication with embedded targets  
 #[derive(Debug)]
@@ -72,16 +75,22 @@ impl RttManager {
         // Phase 1: Try ELF symbol detection (primary method)
         match crate::rtt::elf_parser::get_rtt_symbol_from_elf(firmware_path) {
             Ok(symbol_addr) => {
-                info!("✅ Found _SEGGER_RTT symbol at 0x{:08X}, attempting direct connection", symbol_addr);
-                
+                info!(
+                    "Found _SEGGER_RTT symbol at 0x{:08X}, attempting direct connection",
+                    symbol_addr
+                );
+
                 // Try direct connection at symbol address
                 match self.try_rtt_at_address(session.clone(), symbol_addr).await {
                     Ok(_) => {
-                        info!("🎯 RTT connected successfully using ELF symbol address!");
+                        info!("RTT connected successfully using ELF symbol address!");
                         return Ok(());
                     }
                     Err(e) => {
-                        warn!("RTT connection failed at symbol address 0x{:08X}: {}", symbol_addr, e);
+                        warn!(
+                            "RTT connection failed at symbol address 0x{:08X}: {}",
+                            symbol_addr, e
+                        );
                         info!("Falling back to memory scanning...");
                     }
                 }
@@ -103,7 +112,10 @@ impl RttManager {
         session: Arc<Mutex<Session>>,
         address: u64,
     ) -> Result<()> {
-        debug!("Attempting RTT connection at specific address: 0x{:08X}", address);
+        debug!(
+            "Attempting RTT connection at specific address: 0x{:08X}",
+            address
+        );
 
         // Store session reference
         self.session = Some(session.clone());
@@ -122,17 +134,20 @@ impl RttManager {
                 address
             )));
         }
-        debug!("✅ RTT control block validated at 0x{:08X}", address);
+        debug!("RTT control block validated at 0x{:08X}", address);
 
         // CRITICAL FIX: Use ScanRegion::Exact for direct address connection
         debug!("Using ScanRegion::Exact for direct address connection...");
-        
+
         let scan_region = ScanRegion::Exact(address);
         let rtt_result = Rtt::attach_region(&mut core, &scan_region);
 
         match rtt_result {
             Ok(rtt) => {
-                info!("Successfully attached RTT at ELF symbol address 0x{:08X}!", address);
+                info!(
+                    "Successfully attached RTT at ELF symbol address 0x{:08X}!",
+                    address
+                );
                 self.complete_attachment_sync(rtt)
             }
             Err(e) => {
@@ -156,7 +171,10 @@ impl RttManager {
         // Read 16 bytes for RTT magic identifier
         let mut id_buffer = [0u8; 16];
         core.read(address, &mut id_buffer).map_err(|e| {
-            DebugError::RttError(format!("Failed to read RTT control block at 0x{:08X}: {}", address, e))
+            DebugError::RttError(format!(
+                "Failed to read RTT control block at 0x{:08X}: {}",
+                address, e
+            ))
         })?;
 
         // Check for "SEGGER RTT" magic identifier
@@ -164,9 +182,13 @@ impl RttManager {
         let is_valid = id_buffer == RTT_ID;
 
         if is_valid {
-            debug!("✅ Valid RTT control block found at 0x{:08X}", address);
+            debug!("Valid RTT control block found at 0x{:08X}", address);
         } else {
-            debug!("❌ Invalid RTT control block at 0x{:08X}, found: {:02X?}", address, &id_buffer[..10]);
+            debug!(
+                "Invalid RTT control block at 0x{:08X}, found: {:02X?}",
+                address,
+                &id_buffer[..10]
+            );
         }
 
         Ok(is_valid)
@@ -175,51 +197,49 @@ impl RttManager {
     /// Attach to RTT on target using probe-rs RTT API with enhanced detection
     /// Priority: ELF symbol detection first, then memory scanning fallback
     pub async fn attach(
-        &mut self, 
+        &mut self,
         session: Arc<Mutex<Session>>,
         control_block_address: Option<u64>,
-        memory_ranges: Option<Vec<(u64, u64)>>
+        memory_ranges: Option<Vec<(u64, u64)>>,
     ) -> Result<()> {
         debug!("Attaching to RTT using probe-rs integration with enhanced detection");
-        
+
         // Store session reference
         self.session = Some(session.clone());
-        
+
         // Note: memory_map not needed for probe-rs 0.25 attach_region API
-        
+
         // Get the session and core to perform RTT attachment
         let mut session_guard = session.lock().await;
         let mut core = session_guard.core(0).map_err(|e| {
             error!("Failed to get core for RTT attachment: {}", e);
             DebugError::RttError(format!("Failed to get core: {}", e))
         })?;
-        
+
         // Check if target is running (important for RTT initialization)
         let core_status = core.status().map_err(|e| {
             error!("Failed to get core status: {}", e);
             DebugError::RttError(format!("Failed to get core status: {}", e))
         })?;
         debug!("Core status before RTT attach: {:?}", core_status);
-        
+
         // Build ScanRegion based on parameters
         let scan_region = if let Some(cb_addr) = control_block_address {
             info!("RTT scan: Using exact address: 0x{:08X}", cb_addr);
             ScanRegion::Exact(cb_addr)
         } else if let Some(ranges) = memory_ranges {
             info!("RTT scan: Using custom memory ranges: {:?}", ranges);
-            let ranges = ranges.into_iter()
-                .map(|(start, end)| start..end)
-                .collect();
+            let ranges = ranges.into_iter().map(|(start, end)| start..end).collect();
             ScanRegion::Ranges(ranges)
         } else {
             info!("RTT scan: Using RAM scan (probe-rs default)");
             ScanRegion::Ram
         };
-        
+
         // Try RTT attachment with appropriate scan region
         debug!("Attempting RTT attach with scan region: {:?}", scan_region);
         let rtt_result = Rtt::attach_region(&mut core, &scan_region);
-        
+
         match rtt_result {
             Ok(rtt) => {
                 info!("Successfully attached to RTT control block!");
@@ -227,7 +247,7 @@ impl RttManager {
             }
             Err(e) => {
                 error!("RTT attachment failed: {}", e);
-                
+
                 // Provide detailed debugging information
                 let detailed_error = format!(
                     "RTT attachment failed: {}\n\n\
@@ -240,23 +260,20 @@ impl RttManager {
                     - Ensure target is running (not halted) during RTT initialization\n\
                     - Check that firmware has sufficient time to initialize RTT\n\
                     - Verify memory regions contain RTT control block\n\
-                    - For defmt: ensure defmt-rtt feature is enabled in firmware", 
-                    e, 
-                    core_status,
-                    scan_region,
-                    control_block_address
+                    - For defmt: ensure defmt-rtt feature is enabled in firmware",
+                    e, core_status, scan_region, control_block_address
                 );
-                
+
                 Err(DebugError::RttError(detailed_error))
             }
         }
     }
-    
-    /// Complete RTT attachment by discovering channels (synchronous version)
+
+    /// Finish RTT attachment by discovering channels (synchronous version)
     fn complete_attachment_sync(&mut self, mut rtt: Rtt) -> Result<()> {
         // Clear any previous state
         self.channels.clear();
-        
+
         // Discover up channels (target to host)
         let up_channels = rtt.up_channels();
         self.up_channel_count = up_channels.len();
@@ -270,11 +287,15 @@ impl RttManager {
                     buffer_size: up_channel.buffer_size(),
                 };
                 self.channels.insert(i as u32, channel_info);
-                debug!("Discovered up channel {}: {} (size: {} bytes)", 
-                       i, up_channel.name().unwrap_or("unnamed"), up_channel.buffer_size());
+                debug!(
+                    "Discovered up channel {}: {} (size: {} bytes)",
+                    i,
+                    up_channel.name().unwrap_or("unnamed"),
+                    up_channel.buffer_size()
+                );
             }
         }
-        
+
         // Discover down channels (host to target)
         let down_channels = rtt.down_channels();
         self.down_channel_count = down_channels.len();
@@ -282,67 +303,109 @@ impl RttManager {
             if let Some(down_channel) = down_channels.get(i) {
                 let channel_info = ChannelInfo {
                     id: i as u32,
-                    name: down_channel.name().unwrap_or(&format!("Down{}", i)).to_string(),
+                    name: down_channel
+                        .name()
+                        .unwrap_or(&format!("Down{}", i))
+                        .to_string(),
                     direction: ChannelDirection::Down,
                     mode: "RTT".to_string(), // Simplified as mode() requires &mut Core
                     buffer_size: down_channel.buffer_size(),
                 };
                 // Use offset for down channels to avoid ID conflicts
                 self.channels.insert(1000 + i as u32, channel_info);
-                debug!("Discovered down channel {}: {} (size: {} bytes)", 
-                       i, down_channel.name().unwrap_or("unnamed"), down_channel.buffer_size());
+                debug!(
+                    "Discovered down channel {}: {} (size: {} bytes)",
+                    i,
+                    down_channel.name().unwrap_or("unnamed"),
+                    down_channel.buffer_size()
+                );
             }
         }
-        
+
         // Store the RTT instance
         self.rtt = Some(rtt);
         self.attached = true;
-        
-        info!("RTT attachment completed: {} up channels, {} down channels", 
-              self.up_channel_count, self.down_channel_count);
+
+        info!(
+            "RTT attachment completed: {} up channels, {} down channels",
+            self.up_channel_count, self.down_channel_count
+        );
         Ok(())
     }
 
     /// Detach from RTT
     pub async fn detach(&mut self) -> Result<()> {
         debug!("Detaching from RTT");
-        
+
         self.attached = false;
         self.rtt = None;
         self.session = None;
         self.channels.clear();
         self.up_channel_count = 0;
         self.down_channel_count = 0;
-        
+
         info!("RTT detached successfully");
         Ok(())
     }
 
     /// Read from RTT up channel using probe-rs RTT API
-    pub async fn read_channel(&mut self, channel: u32) -> Result<Vec<u8>> {
+    pub async fn read_channel(
+        &mut self,
+        channel: u32,
+        max_bytes: usize,
+        timeout_ms: u64,
+    ) -> Result<Vec<u8>> {
+        if max_bytes == 0 {
+            return Ok(Vec::new());
+        }
+
+        let started = tokio::time::Instant::now();
+        let timeout = tokio::time::Duration::from_millis(timeout_ms);
+
+        loop {
+            let data = self.read_channel_once(channel, max_bytes).await?;
+            if !data.is_empty() || timeout_ms == 0 || started.elapsed() >= timeout {
+                return Ok(data);
+            }
+
+            let remaining = timeout.saturating_sub(started.elapsed());
+            let sleep_for = remaining.min(tokio::time::Duration::from_millis(10));
+            if sleep_for.is_zero() {
+                return Ok(Vec::new());
+            }
+            tokio::time::sleep(sleep_for).await;
+        }
+    }
+
+    async fn read_channel_once(&mut self, channel: u32, max_bytes: usize) -> Result<Vec<u8>> {
         if !self.attached {
             return Err(DebugError::RttError("RTT not attached".to_string()));
         }
 
-        let session = self.session.as_ref()
+        let session = self
+            .session
+            .as_ref()
             .ok_or_else(|| DebugError::RttError("No session available".to_string()))?;
-        
-        let rtt = self.rtt.as_mut()
+
+        let rtt = self
+            .rtt
+            .as_mut()
             .ok_or_else(|| DebugError::RttError("No RTT instance available".to_string()))?;
-        
+
         // Lock session and get core
         let mut session_guard = session.lock().await;
-        let mut core = session_guard.core(0).map_err(|e| {
-            DebugError::RttError(format!("Failed to get core: {}", e))
-        })?;
-        
+        let mut core = session_guard
+            .core(0)
+            .map_err(|e| DebugError::RttError(format!("Failed to get core: {}", e)))?;
+
         // Get the up channel (mutable reference)
         let up_channels = rtt.up_channels();
-        let up_channel = up_channels.get_mut(channel as usize)
+        let up_channel = up_channels
+            .get_mut(channel as usize)
             .ok_or_else(|| DebugError::RttError(format!("Up channel {} not found", channel)))?;
-        
+
         // Read from RTT channel
-        let mut buffer = vec![0u8; 1024]; // Buffer for reading
+        let mut buffer = vec![0u8; max_bytes];
         match up_channel.read(&mut core, &mut buffer) {
             Ok(bytes_read) => {
                 buffer.truncate(bytes_read);
@@ -364,28 +427,40 @@ impl RttManager {
             return Err(DebugError::RttError("RTT not attached".to_string()));
         }
 
-        let session = self.session.as_ref()
+        let session = self
+            .session
+            .as_ref()
             .ok_or_else(|| DebugError::RttError("No session available".to_string()))?;
-        
-        let rtt = self.rtt.as_mut()
+
+        let rtt = self
+            .rtt
+            .as_mut()
             .ok_or_else(|| DebugError::RttError("No RTT instance available".to_string()))?;
-        
+
         // Lock session and get core
         let mut session_guard = session.lock().await;
-        let mut core = session_guard.core(0).map_err(|e| {
-            DebugError::RttError(format!("Failed to get core: {}", e))
-        })?;
-        
+        let mut core = session_guard
+            .core(0)
+            .map_err(|e| DebugError::RttError(format!("Failed to get core: {}", e)))?;
+
         // Get the down channel (mutable reference)
         let down_channels = rtt.down_channels();
-        let down_channel = down_channels.get_mut(channel as usize)
+        let down_channel = down_channels
+            .get_mut(channel as usize)
             .ok_or_else(|| DebugError::RttError(format!("Down channel {} not found", channel)))?;
-        
+
         // Write to RTT channel
         match down_channel.write(&mut core, data) {
             Ok(bytes_written) => {
-                debug!("Wrote {} bytes to RTT down channel {}", bytes_written, channel);
-                info!("RTT Write Channel {}: {:?}", channel, String::from_utf8_lossy(&data[..bytes_written]));
+                debug!(
+                    "Wrote {} bytes to RTT down channel {}",
+                    bytes_written, channel
+                );
+                info!(
+                    "RTT Write Channel {}: {:?}",
+                    channel,
+                    String::from_utf8_lossy(&data[..bytes_written])
+                );
                 Ok(bytes_written)
             }
             Err(e) => {

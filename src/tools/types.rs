@@ -1,7 +1,7 @@
 //! Type definitions for embedded debugger MCP tools
 
-use serde::{Deserialize, Serialize};
 use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 // =============================================================================
 // Debugger Management Types
@@ -29,8 +29,12 @@ pub struct ConnectArgs {
     pub halt_after_connect: bool,
 }
 
-fn default_speed_khz() -> u32 { 4000 }
-fn default_true() -> bool { true }
+fn default_speed_khz() -> u32 {
+    4000
+}
+fn default_true() -> bool {
+    true
+}
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct DisconnectArgs {
@@ -72,7 +76,9 @@ pub struct ResetArgs {
     pub halt_after_reset: bool,
 }
 
-fn default_reset_type() -> String { "hardware".to_string() }
+fn default_reset_type() -> String {
+    "hardware".to_string()
+}
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct StepArgs {
@@ -103,7 +109,9 @@ pub struct ReadMemoryArgs {
     pub format: String,
 }
 
-fn default_format() -> String { "hex".to_string() }
+fn default_format() -> String {
+    "hex".to_string()
+}
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct WriteMemoryArgs {
@@ -117,7 +125,6 @@ pub struct WriteMemoryArgs {
     #[serde(default = "default_format")]
     pub format: String,
 }
-
 
 // =============================================================================
 // Breakpoint Management Types
@@ -134,7 +141,9 @@ pub struct SetBreakpointArgs {
     pub breakpoint_type: String,
 }
 
-fn default_breakpoint_type() -> String { "hardware".to_string() }
+fn default_breakpoint_type() -> String {
+    "hardware".to_string()
+}
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ClearBreakpointArgs {
@@ -144,12 +153,9 @@ pub struct ClearBreakpointArgs {
     pub address: String,
 }
 
-
 // =============================================================================
 // Flash Programming Types
 // =============================================================================
-
-
 
 // =============================================================================
 // New Flash Programming Types
@@ -168,7 +174,9 @@ pub struct FlashEraseArgs {
     pub size: Option<u32>,
 }
 
-fn default_erase_all() -> String { "all".to_string() }
+fn default_erase_all() -> String {
+    "all".to_string()
+}
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct FlashProgramArgs {
@@ -186,7 +194,9 @@ pub struct FlashProgramArgs {
     pub verify: bool,
 }
 
-fn default_auto_format() -> String { "auto".to_string() }
+fn default_auto_format() -> String {
+    "auto".to_string()
+}
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct FlashVerifyArgs {
@@ -222,7 +232,9 @@ pub struct RunFirmwareArgs {
     pub rtt_timeout_ms: u32,
 }
 
-fn default_rtt_timeout() -> u32 { 3000 }
+fn default_rtt_timeout() -> u32 {
+    3000
+}
 
 // =============================================================================
 // RTT Communication Types
@@ -266,8 +278,12 @@ pub struct RttReadArgs {
     pub timeout_ms: u64,
 }
 
-fn default_max_bytes() -> usize { 1024 }
-fn default_timeout_ms() -> u64 { 1000 }
+fn default_max_bytes() -> usize {
+    1024
+}
+fn default_timeout_ms() -> u64 {
+    1000
+}
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct RttWriteArgs {
@@ -283,7 +299,9 @@ pub struct RttWriteArgs {
     pub encoding: String,
 }
 
-fn default_encoding() -> String { "utf8".to_string() }
+fn default_encoding() -> String {
+    "utf8".to_string()
+}
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct RttChannelsArgs {

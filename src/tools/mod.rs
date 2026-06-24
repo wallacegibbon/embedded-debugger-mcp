@@ -1,5 +1,5 @@
 //! Embedded debugger MCP tools module
-//! 
+//!
 //! This module provides a unified tool handler for all embedded debugging operations
 //! using the RMCP 0.3.2 API patterns, similar to the serial-mcp-rs implementation.
 

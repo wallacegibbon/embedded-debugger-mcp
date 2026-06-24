@@ -1,14 +1,14 @@
 //! Configuration management for the debugger MCP server
 
+use crate::error::{DebugError, Result};
+use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use clap::Parser;
-use crate::error::{DebugError, Result};
 
 /// Command line arguments
 #[derive(Parser, Debug)]
-#[command(name = "debugger-mcp-rs")]
+#[command(name = "embedded-debugger-mcp")]
 #[command(about = "A Model Context Protocol server for embedded debugging")]
 #[command(version)]
 pub struct Args {
@@ -71,6 +71,67 @@ pub struct Args {
     /// Show current configuration and exit
     #[arg(long)]
     pub show_config: bool,
+
+    /// CLI command to run. Defaults to serving MCP over stdio when omitted.
+    #[command(subcommand)]
+    pub command: Option<Command>,
+}
+
+/// Top-level CLI commands.
+#[derive(Subcommand, Debug, Clone, PartialEq, Eq)]
+pub enum Command {
+    /// Serve the MCP server over stdio.
+    Serve,
+    /// Configuration utilities.
+    Config {
+        #[command(subcommand)]
+        action: ConfigCommand,
+    },
+    /// Debug probe utilities.
+    Probes {
+        #[command(subcommand)]
+        action: ProbeCommand,
+    },
+    /// Run environment checks for CLI, MCP, and hardware discovery.
+    Doctor {
+        /// Emit machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Skill helper commands for agent-driven workflows.
+    Skill {
+        #[command(subcommand)]
+        action: SkillCommand,
+    },
+}
+
+/// Configuration CLI commands.
+#[derive(Subcommand, Debug, Clone, PartialEq, Eq)]
+pub enum ConfigCommand {
+    /// Print a default configuration file.
+    Generate,
+    /// Validate the effective configuration.
+    Validate,
+    /// Show the effective configuration.
+    Show,
+}
+
+/// Probe CLI commands.
+#[derive(Subcommand, Debug, Clone, PartialEq, Eq)]
+pub enum ProbeCommand {
+    /// List connected debug probes.
+    List {
+        /// Emit machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+/// Skill helper CLI commands.
+#[derive(Subcommand, Debug, Clone, PartialEq, Eq)]
+pub enum SkillCommand {
+    /// Print the default prompt for CLI+Skill workflows.
+    PrintPrompt,
 }
 
 /// Main configuration structure
@@ -105,8 +166,9 @@ impl Config {
     /// Load configuration from file or create default
     pub fn load(config_path: Option<&PathBuf>) -> Result<Self> {
         if let Some(path) = config_path {
-            let content = std::fs::read_to_string(path)
-                .map_err(|e| DebugError::InvalidConfig(format!("Failed to read config file: {}", e)))?;
+            let content = std::fs::read_to_string(path).map_err(|e| {
+                DebugError::InvalidConfig(format!("Failed to read config file: {}", e))
+            })?;
             let config: Config = toml::from_str(&content)
                 .map_err(|e| DebugError::InvalidConfig(format!("Invalid TOML syntax: {}", e)))?;
             config.validate()?;
@@ -134,13 +196,39 @@ impl Config {
     /// Validate configuration
     pub fn validate(&self) -> Result<()> {
         if self.server.max_sessions == 0 {
-            return Err(DebugError::InvalidConfig("max_sessions must be > 0".to_string()));
+            return Err(DebugError::InvalidConfig(
+                "max_sessions must be > 0".to_string(),
+            ));
         }
         if self.debugger.default_speed_khz == 0 {
-            return Err(DebugError::InvalidConfig("default_speed_khz must be > 0".to_string()));
+            return Err(DebugError::InvalidConfig(
+                "default_speed_khz must be > 0".to_string(),
+            ));
         }
         if self.rtt.buffer_size == 0 {
-            return Err(DebugError::InvalidConfig("rtt.buffer_size must be > 0".to_string()));
+            return Err(DebugError::InvalidConfig(
+                "rtt.buffer_size must be > 0".to_string(),
+            ));
+        }
+        if self.memory.max_read_size == 0 {
+            return Err(DebugError::InvalidConfig(
+                "memory.max_read_size must be > 0".to_string(),
+            ));
+        }
+        if self.memory.max_write_size == 0 {
+            return Err(DebugError::InvalidConfig(
+                "memory.max_write_size must be > 0".to_string(),
+            ));
+        }
+        if self.flash.max_binary_size == 0 {
+            return Err(DebugError::InvalidConfig(
+                "flash.max_binary_size must be > 0".to_string(),
+            ));
+        }
+        if self.security.max_file_size == 0 {
+            return Err(DebugError::InvalidConfig(
+                "security.max_file_size must be > 0".to_string(),
+            ));
         }
         Ok(())
     }
@@ -154,54 +242,68 @@ impl Config {
     /// Get default target configurations
     fn default_targets() -> HashMap<String, TargetConfig> {
         let mut targets = HashMap::new();
-        
-        targets.insert("stm32f407".to_string(), TargetConfig {
-            name: "STM32F407VG".to_string(),
-            chip: "STM32F407VGTx".to_string(),
-            architecture: "Cortex-M4".to_string(),
-            flash_size: 1048576,  // 1MB
-            ram_size: 196608,     // 192KB
-            flash_algorithm: "STM32F4xx".to_string(),
-            memory_regions: vec![
-                MemoryRegion {
-                    name: "Flash".to_string(),
-                    start: 0x08000000,
-                    end: 0x080FFFFF,
-                    access: "rx".to_string(),
-                },
-                MemoryRegion {
-                    name: "RAM".to_string(),
-                    start: 0x20000000,
-                    end: 0x2002FFFF,
-                    access: "rwx".to_string(),
-                },
-            ],
-        });
 
-        targets.insert("nrf52832".to_string(), TargetConfig {
-            name: "nRF52832".to_string(),
-            chip: "nrf52832_xxAA".to_string(),
-            architecture: "Cortex-M4F".to_string(),
-            flash_size: 524288,   // 512KB
-            ram_size: 65536,      // 64KB
-            flash_algorithm: "nRF52".to_string(),
-            memory_regions: vec![
-                MemoryRegion {
-                    name: "Flash".to_string(),
-                    start: 0x00000000,
-                    end: 0x0007FFFF,
-                    access: "rx".to_string(),
-                },
-                MemoryRegion {
-                    name: "RAM".to_string(),
-                    start: 0x20000000,
-                    end: 0x2000FFFF,
-                    access: "rwx".to_string(),
-                },
-            ],
-        });
+        targets.insert(
+            "stm32f407".to_string(),
+            TargetConfig {
+                name: "STM32F407VG".to_string(),
+                chip: "STM32F407VGTx".to_string(),
+                architecture: "Cortex-M4".to_string(),
+                flash_size: 1048576, // 1MB
+                ram_size: 196608,    // 192KB
+                flash_algorithm: "STM32F4xx".to_string(),
+                memory_regions: vec![
+                    MemoryRegion {
+                        name: "Flash".to_string(),
+                        start: 0x08000000,
+                        end: 0x080FFFFF,
+                        access: "rx".to_string(),
+                    },
+                    MemoryRegion {
+                        name: "RAM".to_string(),
+                        start: 0x20000000,
+                        end: 0x2002FFFF,
+                        access: "rwx".to_string(),
+                    },
+                ],
+            },
+        );
+
+        targets.insert(
+            "nrf52832".to_string(),
+            TargetConfig {
+                name: "nRF52832".to_string(),
+                chip: "nrf52832_xxAA".to_string(),
+                architecture: "Cortex-M4F".to_string(),
+                flash_size: 524288, // 512KB
+                ram_size: 65536,    // 64KB
+                flash_algorithm: "nRF52".to_string(),
+                memory_regions: vec![
+                    MemoryRegion {
+                        name: "Flash".to_string(),
+                        start: 0x00000000,
+                        end: 0x0007FFFF,
+                        access: "rx".to_string(),
+                    },
+                    MemoryRegion {
+                        name: "RAM".to_string(),
+                        start: 0x20000000,
+                        end: 0x2000FFFF,
+                        access: "rwx".to_string(),
+                    },
+                ],
+            },
+        );
 
         targets
+    }
+}
+
+impl From<usize> for Config {
+    fn from(max_sessions: usize) -> Self {
+        let mut config = Config::default();
+        config.server.max_sessions = max_sessions;
+        config
     }
 }
 
@@ -285,10 +387,10 @@ pub struct MemoryConfig {
 impl Default for MemoryConfig {
     fn default() -> Self {
         Self {
-            max_read_size: 65536,  // 64KB
-            max_write_size: 4096,  // 4KB
+            max_read_size: 65536, // 64KB
+            max_write_size: 4096, // 4KB
             cache_enable: true,
-            cache_size: 1048576,   // 1MB
+            cache_size: 1048576, // 1MB
         }
     }
 }
@@ -309,7 +411,7 @@ impl Default for FlashConfig {
             default_program_timeout_ms: 60000,
             verify_after_program: true,
             allow_erase: false,
-            max_binary_size: 10485760,  // 10MB
+            max_binary_size: 10485760, // 10MB
         }
     }
 }
@@ -330,7 +432,7 @@ impl Default for SecurityConfig {
             allow_memory_write: true,
             restrict_memory_access: false,
             allowed_file_paths: vec![],
-            max_file_size: 10485760,  // 10MB
+            max_file_size: 10485760, // 10MB
         }
     }
 }
@@ -351,7 +453,7 @@ pub struct MemoryRegion {
     pub name: String,
     pub start: u64,
     pub end: u64,
-    pub access: String,  // "r", "w", "x", "rw", "rx", "rwx"
+    pub access: String, // "r", "w", "x", "rw", "rx", "rwx"
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

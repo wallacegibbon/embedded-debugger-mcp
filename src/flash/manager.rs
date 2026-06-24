@@ -1,12 +1,15 @@
 //! Flash programming manager - Real probe-rs integration
 
-use crate::error::{Result, DebugError};
+use crate::error::{DebugError, Result};
 use std::path::Path;
 use std::time::Instant;
 use tracing::{debug, info, warn};
 
-// Probe-rs imports  
-use probe_rs::{flashing::{self, FlashProgress}, Session, MemoryInterface};
+// Probe-rs imports
+use probe_rs::{
+    flashing::{self, FlashProgress},
+    MemoryInterface, Session,
+};
 
 /// Erase operation types
 #[derive(Debug, Clone)]
@@ -67,18 +70,16 @@ impl FlashManager {
     }
 
     /// Erase flash memory
-    pub async fn erase_flash(
-        session: &mut Session,
-        erase_type: EraseType,
-    ) -> Result<EraseResult> {
+    pub async fn erase_flash(session: &mut Session, erase_type: EraseType) -> Result<EraseResult> {
         let start_time = Instant::now();
-        
+
         match erase_type {
             EraseType::All => {
                 debug!("Starting full flash erase");
-                flashing::erase_all(session, FlashProgress::empty())
-                    .map_err(|e| DebugError::FlashOperationFailed(format!("Full erase failed: {}", e)))?;
-                
+                flashing::erase_all(session, FlashProgress::empty()).map_err(|e| {
+                    DebugError::FlashOperationFailed(format!("Full erase failed: {}", e))
+                })?;
+
                 info!("Full flash erase completed");
                 Ok(EraseResult {
                     erase_time_ms: start_time.elapsed().as_millis() as u64,
@@ -86,27 +87,9 @@ impl FlashManager {
                 })
             }
             EraseType::Sectors { address, size } => {
-                debug!("Starting sector erase at 0x{:08X}, size: {} bytes", address, size);
-                
-                // Calculate sector range - this is target-specific, using approximation
-                let sector_size = 4096; // Common sector size, should be target-specific
-                let sector_count = (size + sector_size - 1) / sector_size;
-                
-                // Use probe-rs flashing API for sector erase
-                let mut core = session.core(0)
-                    .map_err(|e| DebugError::FlashOperationFailed(format!("Failed to get core: {}", e)))?;
-                
-                // For now, we'll use memory writes to simulate erase (0xFF)
-                // Real implementation should use target-specific flash algorithms
-                let erase_data = vec![0xFFu8; size];
-                core.write(address, &erase_data)
-                    .map_err(|e| DebugError::FlashOperationFailed(format!("Sector erase failed: {}", e)))?;
-                
-                info!("Sector erase completed: {} sectors", sector_count);
-                Ok(EraseResult {
-                    erase_time_ms: start_time.elapsed().as_millis() as u64,
-                    sectors_erased: Some(sector_count),
-                })
+                Err(DebugError::FlashOperationFailed(format!(
+                    "Sector erase by address is not implemented safely for probe-rs 0.25 (requested address 0x{address:08X}, size {size} bytes). Use erase_type='all' or add a target-specific sector-index mapping before enabling this operation."
+                )))
             }
         }
     }
@@ -117,12 +100,16 @@ impl FlashManager {
         file_path: &Path,
         format: FileFormat,
         base_address: Option<u64>,
+        verify: bool,
     ) -> Result<ProgramResult> {
         let start_time = Instant::now();
-        
+
         // Check file existence
         if !file_path.exists() {
-            return Err(DebugError::FlashOperationFailed(format!("File not found: {}", file_path.display())));
+            return Err(DebugError::FlashOperationFailed(format!(
+                "File not found: {}",
+                file_path.display()
+            )));
         }
 
         debug!("Programming file: {}", file_path.display());
@@ -133,19 +120,29 @@ impl FlashManager {
                 // Auto-detect based on extension
                 match file_path.extension().and_then(|s| s.to_str()) {
                     Some("elf") => flashing::Format::Elf,
-                    Some("hex") => flashing::Format::Hex, 
-                    Some("bin") => flashing::Format::Bin(probe_rs::flashing::BinOptions { base_address: None, skip: 0 }),
-                    _ => return Err(DebugError::FlashOperationFailed("Cannot auto-detect file format".to_string())),
+                    Some("hex") => flashing::Format::Hex,
+                    Some("bin") => flashing::Format::Bin(probe_rs::flashing::BinOptions {
+                        base_address,
+                        skip: 0,
+                    }),
+                    _ => {
+                        return Err(DebugError::FlashOperationFailed(
+                            "Cannot auto-detect file format".to_string(),
+                        ))
+                    }
                 }
             }
             FileFormat::Elf => flashing::Format::Elf,
             FileFormat::Hex => flashing::Format::Hex,
-            FileFormat::Bin => flashing::Format::Bin(probe_rs::flashing::BinOptions { base_address, skip: 0 }),
+            FileFormat::Bin => flashing::Format::Bin(probe_rs::flashing::BinOptions {
+                base_address,
+                skip: 0,
+            }),
         };
 
         // Setup download options - use default and override what we need
         let mut options = flashing::DownloadOptions::default();
-        options.verify = true;
+        options.verify = verify;
         options.progress = None;
 
         // Set base address for BIN files - this might need to be handled differently
@@ -161,48 +158,36 @@ impl FlashManager {
             .map_err(|e| DebugError::FlashOperationFailed(format!("Programming failed: {}", e)))?;
 
         let elapsed = start_time.elapsed().as_millis() as u64;
-        
+
         info!("File programming completed in {}ms", elapsed);
-        
+
         // Since we can't get exact bytes from probe-rs API, estimate from file size
         let file_size = std::fs::metadata(file_path)
             .map(|m| m.len() as usize)
             .unwrap_or(0);
-        
+
         Ok(ProgramResult {
             bytes_programmed: file_size,
             programming_time_ms: elapsed,
-            verification_result: Some(true), // probe-rs handles verification internally
+            verification_result: verify.then_some(true),
         })
     }
 
     /// Program binary data to flash
     pub async fn program_data(
-        session: &mut Session,
+        _session: &mut Session,
         data: &[u8],
         base_address: u64,
     ) -> Result<ProgramResult> {
-        let start_time = Instant::now();
-        
-        debug!("Programming {} bytes to address 0x{:08X}", data.len(), base_address);
-
-        // Use direct memory write for now - FlashLoader API requires memory map
-        let mut core = session.core(0)
-            .map_err(|e| DebugError::FlashOperationFailed(format!("Failed to get core: {}", e)))?;
-        
-        // Write data directly to flash memory
-        core.write(base_address, data)
-            .map_err(|e| DebugError::FlashOperationFailed(format!("Failed to write data: {}", e)))?;
-
-        let elapsed = start_time.elapsed().as_millis() as u64;
-        
-        info!("Data programming completed: {} bytes in {}ms", data.len(), elapsed);
-
-        Ok(ProgramResult {
-            bytes_programmed: data.len(),
-            programming_time_ms: elapsed,
-            verification_result: None, // Manual verification needed
-        })
+        debug!(
+            "Rejected direct flash data programming: {} bytes to address 0x{:08X}",
+            data.len(),
+            base_address
+        );
+        Err(DebugError::FlashOperationFailed(
+            "Direct flash programming by memory write is disabled. Program ELF/HEX/BIN files through probe-rs flash algorithms instead."
+                .to_string(),
+        ))
     }
 
     /// Verify flash contents
@@ -211,15 +196,21 @@ impl FlashManager {
         expected_data: &[u8],
         address: u64,
     ) -> Result<VerifyResult> {
-        debug!("Verifying {} bytes at address 0x{:08X}", expected_data.len(), address);
+        debug!(
+            "Verifying {} bytes at address 0x{:08X}",
+            expected_data.len(),
+            address
+        );
 
-        let mut core = session.core(0)
+        let mut core = session
+            .core(0)
             .map_err(|e| DebugError::FlashOperationFailed(format!("Failed to get core: {}", e)))?;
-        
+
         // Read actual data from flash
         let mut actual_data = vec![0u8; expected_data.len()];
-        core.read(address, &mut actual_data)
-            .map_err(|e| DebugError::FlashOperationFailed(format!("Failed to read flash: {}", e)))?;
+        core.read(address, &mut actual_data).map_err(|e| {
+            DebugError::FlashOperationFailed(format!("Failed to read flash: {}", e))
+        })?;
 
         // Compare data and find mismatches
         let mut mismatches = Vec::new();
@@ -234,9 +225,12 @@ impl FlashManager {
         }
 
         let success = mismatches.is_empty();
-        
+
         if success {
-            info!("Flash verification successful: {} bytes", expected_data.len());
+            info!(
+                "Flash verification successful: {} bytes",
+                expected_data.len()
+            );
         } else {
             warn!("Flash verification failed: {} mismatches", mismatches.len());
         }
