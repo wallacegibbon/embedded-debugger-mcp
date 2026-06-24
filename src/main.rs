@@ -11,7 +11,7 @@ use std::process::Command as ProcessCommand;
 use tracing::{debug, error, info};
 use tracing_subscriber::{fmt, EnvFilter};
 
-use embedded_debugger_mcp::{config::Args, tools::EmbeddedDebuggerToolHandler, Config};
+use embedded_debugger_mcp::{config::Args, tools::EmbeddedDebuggerToolHandler, Config, DebugError};
 use skill_installer::{install_skill_bundle, DEFAULT_SKILL_PROMPT};
 
 mod skill_installer;
@@ -32,6 +32,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     {
         let config = Config::default();
         println!("{}", config.to_toml()?);
+        return Ok(());
+    }
+
+    if let Some(CliCommand::Doctor { json }) = args.command.clone() {
+        let mut config_result = Config::load_unvalidated(args.config.as_ref());
+        if let Ok(config) = &mut config_result {
+            config.merge_args(&args);
+        }
+        let report = DoctorReport::collect(config_result);
+        print_doctor_report(&report, json)?;
         return Ok(());
     }
 
@@ -110,28 +120,8 @@ async fn run_cli_command(
             Ok(())
         }
         CliCommand::Doctor { json } => {
-            let report = DoctorReport::collect(&config);
-            if json {
-                println!("{}", serde_json::to_string_pretty(&report)?);
-            } else {
-                println!("embedded-debugger-mcp doctor");
-                println!("version: {}", report.version);
-                println!(
-                    "rustc: {}",
-                    report.rustc_version.as_deref().unwrap_or("not found")
-                );
-                println!("config_valid: {}", report.config_valid);
-                if let Some(error) = &report.config_error {
-                    println!("config_error: {}", error);
-                }
-                println!("probe_count: {}", report.probe_count.unwrap_or(0));
-                if let Some(error) = &report.probe_error {
-                    println!("probe_error: {}", error);
-                }
-                println!("mcp_mode: use `embedded-debugger-mcp serve`");
-                println!("cli_skill_mode: use `embedded-debugger-mcp skill print-prompt`");
-            }
-            Ok(())
+            let report = DoctorReport::collect(Ok(config));
+            print_doctor_report(&report, json)
         }
         CliCommand::Skill { action } => match action {
             SkillCommand::PrintPrompt => {
@@ -189,8 +179,8 @@ struct DoctorReport {
 }
 
 impl DoctorReport {
-    fn collect(config: &Config) -> Self {
-        let config_result = config.validate();
+    fn collect(config_result: Result<Config, DebugError>) -> Self {
+        let config_result = config_result.and_then(|config| config.validate().map(|()| config));
         let probe_result = ProbeDiscovery::list_probes();
 
         Self {
@@ -202,6 +192,34 @@ impl DoctorReport {
             probe_error: probe_result.err().map(|error| error.to_string()),
         }
     }
+}
+
+fn print_doctor_report(
+    report: &DoctorReport,
+    json: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(report)?);
+        return Ok(());
+    }
+
+    println!("embedded-debugger-mcp doctor");
+    println!("version: {}", report.version);
+    println!(
+        "rustc: {}",
+        report.rustc_version.as_deref().unwrap_or("not found")
+    );
+    println!("config_valid: {}", report.config_valid);
+    if let Some(error) = &report.config_error {
+        println!("config_error: {}", error);
+    }
+    println!("probe_count: {}", report.probe_count.unwrap_or(0));
+    if let Some(error) = &report.probe_error {
+        println!("probe_error: {}", error);
+    }
+    println!("mcp_mode: use `embedded-debugger-mcp serve`");
+    println!("cli_skill_mode: use `embedded-debugger-mcp skill print-prompt`");
+    Ok(())
 }
 
 fn command_output(command: &str, args: &[&str]) -> Option<String> {

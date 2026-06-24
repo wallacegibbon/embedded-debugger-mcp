@@ -3,6 +3,7 @@
 use clap::Parser;
 use embedded_debugger_mcp::config::Args;
 use embedded_debugger_mcp::Config;
+use std::process::Command;
 
 #[tokio::test]
 async fn test_config_validation() {
@@ -65,6 +66,46 @@ fn test_cli_explicit_values_override_config_file_values() {
     assert_eq!(config.debugger.default_speed_khz, 1600);
     assert!(config.security.allow_flash_erase);
     assert!(config.security.restrict_memory_access);
+}
+
+#[test]
+fn test_load_unvalidated_keeps_doctor_reportable_config() {
+    let mut config = Config::default();
+    config.server.max_sessions = 0;
+    let temp = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(temp.path(), config.to_toml().unwrap()).unwrap();
+    let path = temp.path().to_path_buf();
+
+    let unvalidated = Config::load_unvalidated(Some(&path)).unwrap();
+    assert!(unvalidated.validate().is_err());
+    assert!(Config::load(Some(&path)).is_err());
+}
+
+#[test]
+fn test_doctor_json_reports_bad_config() {
+    let temp = tempfile::NamedTempFile::new().unwrap();
+    std::fs::write(temp.path(), "not = [").unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_embedded-debugger-mcp"))
+        .arg("--config")
+        .arg(temp.path())
+        .arg("doctor")
+        .arg("--json")
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "doctor should report config errors as JSON: stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["config_valid"], false);
+    assert!(report["config_error"]
+        .as_str()
+        .unwrap()
+        .contains("Invalid TOML syntax"));
 }
 
 #[test]

@@ -283,6 +283,12 @@ impl EmbeddedDebuggerToolHandler {
             &expected_data
         };
 
+        self.ensure_memory_read_allowed_for_target(
+            &session_arc.target_chip,
+            address,
+            expected_data.len(),
+        )?;
+
         // Perform verification
         {
             let mut session = session_arc.session.lock().await;

@@ -198,14 +198,19 @@ impl Default for Config {
 impl Config {
     /// Load configuration from file or create default
     pub fn load(config_path: Option<&PathBuf>) -> Result<Self> {
+        let config = Self::load_unvalidated(config_path)?;
+        config.validate()?;
+        Ok(config)
+    }
+
+    /// Load configuration from file or create default without validating values.
+    pub fn load_unvalidated(config_path: Option<&PathBuf>) -> Result<Self> {
         if let Some(path) = config_path {
             let content = std::fs::read_to_string(path).map_err(|e| {
                 DebugError::InvalidConfig(format!("Failed to read config file: {}", e))
             })?;
-            let config: Config = toml::from_str(&content)
-                .map_err(|e| DebugError::InvalidConfig(format!("Invalid TOML syntax: {}", e)))?;
-            config.validate()?;
-            Ok(config)
+            toml::from_str(&content)
+                .map_err(|e| DebugError::InvalidConfig(format!("Invalid TOML syntax: {}", e)))
         } else {
             Ok(Config::default())
         }

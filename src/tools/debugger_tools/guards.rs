@@ -31,6 +31,15 @@ impl EmbeddedDebuggerToolHandler {
         address: u64,
         size: usize,
     ) -> Result<(), McpError> {
+        self.ensure_memory_read_allowed_for_target(&session.target_chip, address, size)
+    }
+
+    pub(super) fn ensure_memory_read_allowed_for_target(
+        &self,
+        target_chip: &str,
+        address: u64,
+        size: usize,
+    ) -> Result<(), McpError> {
         if size == 0 {
             return Err(McpError::internal_error(
                 "Memory read size must be greater than zero.".to_string(),
@@ -46,7 +55,7 @@ impl EmbeddedDebuggerToolHandler {
                 None,
             ));
         }
-        self.ensure_memory_region_allowed(session, address, size, 'r')
+        self.ensure_memory_region_allowed_for_target(target_chip, address, size, 'r')
     }
 
     pub(super) fn ensure_memory_write_allowed(
@@ -386,6 +395,24 @@ mod tests {
                 None,
                 Some(vec![(0x2000_0000, 0x2000_0000)])
             )
+            .is_err());
+    }
+
+    #[test]
+    fn restricted_flash_verify_reads_use_memory_policy() {
+        let mut config = Config::default();
+        config.security.restrict_memory_access = true;
+        config.memory.max_read_size = 16;
+        let handler = EmbeddedDebuggerToolHandler::new(config);
+
+        assert!(handler
+            .ensure_memory_read_allowed_for_target("STM32F407VGTx", 0x0800_0000, 16)
+            .is_ok());
+        assert!(handler
+            .ensure_memory_read_allowed_for_target("STM32F407VGTx", 0x0800_0000, 17)
+            .is_err());
+        assert!(handler
+            .ensure_memory_read_allowed_for_target("STM32F407VGTx", 0x4000_0000, 4)
             .is_err());
     }
 }
