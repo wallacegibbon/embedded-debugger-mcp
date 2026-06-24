@@ -98,8 +98,42 @@ embedded-debugger-mcp skill print-prompt
 skills/embedded-debugger/
 ```
 
-它是普通 Codex / Claude Code skill。工作流会先运行 CLI 检查；只有 MCP 客户端
-可用时，才会使用 MCP 工具做会话型调试操作。
+它是普通 Codex skill，同时通过 `.claude-plugin/plugin.json` 提供 Claude Code
+插件加载方式。工作流会先运行 CLI 检查；只有 MCP 客户端可用时，才会使用 MCP
+工具做会话型调试操作。
+
+安装到 Codex:
+
+```bash
+mkdir -p ~/.codex/skills
+cp -R skills/embedded-debugger ~/.codex/skills/
+```
+
+然后用类似这样的 prompt 触发:
+
+```text
+Use $embedded-debugger to inspect my embedded target setup.
+```
+
+从当前 checkout 加载到 Claude Code:
+
+```bash
+claude --plugin-dir . --print '/embedded-debugger inspect my embedded target setup'
+```
+
+对于只支持 skill 目录的环境，也可以直接复制 `skills/embedded-debugger` 到本地
+skills 目录。上面的 plugin-dir 方式是本仓库已验证的 Claude Code 斜杠命令路径。
+
+验证 skill 包:
+
+```bash
+python3 .github/scripts/validate_skill.py skills/embedded-debugger
+python3 ~/.codex/skills/.system/skill-creator/scripts/quick_validate.py skills/embedded-debugger
+claude plugin validate .
+```
+
+第一个命令验证仓库内 skill 元数据，第二个命令在已安装 Codex skill creator
+validator 时验证标准 `SKILL.md` 布局，第三个命令验证 Claude Code 插件 manifest。
 
 ## MCP 工具集
 
@@ -191,6 +225,7 @@ cargo test --locked --all-targets --all-features
 RUSTDOCFLAGS="-D warnings" cargo doc --locked --all-features --no-deps
 cargo package --locked
 python3 .github/scripts/validate_skill.py skills/embedded-debugger
+claude plugin validate .
 (cd examples/STM32_demo && CARGO_TARGET_DIR=/tmp/embedded-debugger-mcp-stm32-target cargo +nightly check --locked)
 ```
 

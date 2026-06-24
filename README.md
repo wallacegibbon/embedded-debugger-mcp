@@ -102,8 +102,44 @@ The bundled skill lives in:
 skills/embedded-debugger/
 ```
 
-It is written as a plain Codex/Claude Code skill. The skill starts with CLI
-checks and uses MCP tools only when an MCP client is available.
+It is written as a plain Codex skill and is also packaged for Claude Code with
+`.claude-plugin/plugin.json`. The skill starts with CLI checks and uses MCP
+tools only when an MCP client is available.
+
+Install the skill for Codex:
+
+```bash
+mkdir -p ~/.codex/skills
+cp -R skills/embedded-debugger ~/.codex/skills/
+```
+
+Then trigger it with a prompt such as:
+
+```text
+Use $embedded-debugger to inspect my embedded target setup.
+```
+
+Load it in Claude Code from this checkout:
+
+```bash
+claude --plugin-dir . --print '/embedded-debugger inspect my embedded target setup'
+```
+
+For skill-only environments, the same `skills/embedded-debugger` directory can
+also be copied to a local skills directory. The plugin-dir path above is the
+validated Claude Code slash-command path for this repository.
+
+Validate the skill package:
+
+```bash
+python3 .github/scripts/validate_skill.py skills/embedded-debugger
+python3 ~/.codex/skills/.system/skill-creator/scripts/quick_validate.py skills/embedded-debugger
+claude plugin validate .
+```
+
+The first command validates the repository skill metadata, the second validates
+the standard `SKILL.md` layout when the Codex skill creator validator is
+installed, and the third validates the Claude Code plugin manifest.
 
 ## MCP Tool Set
 
@@ -199,6 +235,7 @@ cargo test --locked --all-targets --all-features
 RUSTDOCFLAGS="-D warnings" cargo doc --locked --all-features --no-deps
 cargo package --locked
 python3 .github/scripts/validate_skill.py skills/embedded-debugger
+claude plugin validate .
 (cd examples/STM32_demo && CARGO_TARGET_DIR=/tmp/embedded-debugger-mcp-stm32-target cargo +nightly check --locked)
 ```
 
