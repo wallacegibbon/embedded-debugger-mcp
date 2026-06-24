@@ -1,12 +1,13 @@
 //! Debug probe discovery and enumeration
 
-use probe_rs::probe::list::Lister;
 use crate::error::{DebugError, Result};
 use crate::utils::ProbeType;
+use probe_rs::probe::list::Lister;
+use serde::Serialize;
 use tracing::{debug, info, warn};
 
 /// Information about discovered debug probe
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ProbeInfo {
     pub identifier: String,
     pub vendor_id: u16,
@@ -24,15 +25,16 @@ impl ProbeDiscovery {
     /// List all available debug probes
     pub fn list_probes() -> Result<Vec<ProbeInfo>> {
         debug!("Discovering debug probes");
-        
+
         let lister = Lister::new();
-        
+
         let probes = lister
             .list_all()
             .into_iter()
             .map(|probe_info| {
-                let probe_type = ProbeType::from_vid_pid(probe_info.vendor_id, probe_info.product_id);
-                
+                let probe_type =
+                    ProbeType::from_vid_pid(probe_info.vendor_id, probe_info.product_id);
+
                 ProbeInfo {
                     identifier: probe_info.identifier.clone(),
                     vendor_id: probe_info.vendor_id,
@@ -47,10 +49,12 @@ impl ProbeDiscovery {
 
         info!("Found {} debug probes", probes.len());
         for probe in &probes {
-            debug!("  {} - {} ({})", 
-                   probe.identifier, 
-                   probe.probe_type, 
-                   probe.serial_number.as_deref().unwrap_or("no serial"));
+            debug!(
+                "  {} - {} ({})",
+                probe.identifier,
+                probe.probe_type,
+                probe.serial_number.as_deref().unwrap_or("no serial")
+            );
         }
 
         Ok(probes)
@@ -63,17 +67,25 @@ impl ProbeDiscovery {
         product_id: Option<u16>,
         probe_type: Option<&str>,
     ) -> Result<ProbeInfo> {
-        debug!("Finding probe with criteria: serial={:?}, vid={:?}, pid={:?}, type={:?}",
-               serial_number, vendor_id, product_id, probe_type);
-        
+        debug!(
+            "Finding probe with criteria: serial={:?}, vid={:?}, pid={:?}, type={:?}",
+            serial_number, vendor_id, product_id, probe_type
+        );
+
         let all_probes = Self::list_probes()?;
-        
+
         if all_probes.is_empty() {
-            return Err(DebugError::ProbeNotFound("No debug probes found".to_string()));
+            return Err(DebugError::ProbeNotFound(
+                "No debug probes found".to_string(),
+            ));
         }
 
         // If no criteria specified, return the first probe
-        if serial_number.is_none() && vendor_id.is_none() && product_id.is_none() && probe_type.is_none() {
+        if serial_number.is_none()
+            && vendor_id.is_none()
+            && product_id.is_none()
+            && probe_type.is_none()
+        {
             return Ok(all_probes[0].clone());
         }
 
@@ -115,15 +127,19 @@ impl ProbeDiscovery {
 
         if matching_probes.is_empty() {
             return Err(DebugError::ProbeNotFound(
-                "No probe found matching the specified criteria".to_string()
+                "No probe found matching the specified criteria".to_string(),
             ));
         }
 
         if matching_probes.len() > 1 {
             warn!("Multiple probes match criteria, using the first one");
             for (i, probe) in matching_probes.iter().enumerate() {
-                debug!("  {}: {} ({})", i, probe.identifier, 
-                       probe.serial_number.as_deref().unwrap_or("no serial"));
+                debug!(
+                    "  {}: {} ({})",
+                    i,
+                    probe.identifier,
+                    probe.serial_number.as_deref().unwrap_or("no serial")
+                );
             }
         }
 
@@ -133,20 +149,25 @@ impl ProbeDiscovery {
     /// Auto-select the best available probe
     pub fn auto_select_probe() -> Result<ProbeInfo> {
         debug!("Auto-selecting debug probe");
-        
+
         let all_probes = Self::list_probes()?;
-        
+
         if all_probes.is_empty() {
-            return Err(DebugError::ProbeNotFound("No debug probes found".to_string()));
+            return Err(DebugError::ProbeNotFound(
+                "No debug probes found".to_string(),
+            ));
         }
 
         // Prefer probes in this order: J-Link, ST-Link, DAPLink, others
         let preferred_order = ["j-link", "st-link", "daplink"];
-        
+
         for preferred_type in &preferred_order {
             for probe in &all_probes {
                 if probe.probe_type.to_lowercase().contains(preferred_type) {
-                    info!("Auto-selected probe: {} ({})", probe.identifier, probe.probe_type);
+                    info!(
+                        "Auto-selected probe: {} ({})",
+                        probe.identifier, probe.probe_type
+                    );
                     return Ok(probe.clone());
                 }
             }
@@ -154,16 +175,19 @@ impl ProbeDiscovery {
 
         // If no preferred probe found, use the first one
         let selected = &all_probes[0];
-        info!("Auto-selected probe: {} ({})", selected.identifier, selected.probe_type);
+        info!(
+            "Auto-selected probe: {} ({})",
+            selected.identifier, selected.probe_type
+        );
         Ok(selected.clone())
     }
 
     /// Get detailed information about a specific probe
     pub fn get_probe_details(identifier: &str) -> Result<ProbeInfo> {
         debug!("Getting details for probe: {}", identifier);
-        
+
         let all_probes = Self::list_probes()?;
-        
+
         all_probes
             .into_iter()
             .find(|probe| probe.identifier == identifier)
@@ -175,10 +199,10 @@ impl ProbeDiscovery {
         match probe_type {
             ProbeType::JLink => {
                 // J-Link supports most ARM and RISC-V targets
-                target_chip.to_lowercase().contains("stm32") ||
-                target_chip.to_lowercase().contains("nrf") ||
-                target_chip.to_lowercase().contains("cortex") ||
-                target_chip.to_lowercase().contains("risc")
+                target_chip.to_lowercase().contains("stm32")
+                    || target_chip.to_lowercase().contains("nrf")
+                    || target_chip.to_lowercase().contains("cortex")
+                    || target_chip.to_lowercase().contains("risc")
             }
             ProbeType::StLink => {
                 // ST-Link primarily supports STM32
@@ -186,14 +210,14 @@ impl ProbeDiscovery {
             }
             ProbeType::DapLink => {
                 // DAPLink supports ARM Cortex targets
-                target_chip.to_lowercase().contains("cortex") ||
-                target_chip.to_lowercase().contains("stm32") ||
-                target_chip.to_lowercase().contains("nrf")
+                target_chip.to_lowercase().contains("cortex")
+                    || target_chip.to_lowercase().contains("stm32")
+                    || target_chip.to_lowercase().contains("nrf")
             }
             ProbeType::Blackmagic => {
                 // Black Magic Probe supports ARM Cortex
-                target_chip.to_lowercase().contains("cortex") ||
-                target_chip.to_lowercase().contains("stm32")
+                target_chip.to_lowercase().contains("cortex")
+                    || target_chip.to_lowercase().contains("stm32")
             }
             ProbeType::Ftdi => {
                 // FTDI can support various targets
@@ -213,10 +237,22 @@ mod tests {
 
     #[test]
     fn test_probe_type_support() {
-        assert!(ProbeDiscovery::check_target_support(&ProbeType::JLink, "STM32F407VG"));
-        assert!(ProbeDiscovery::check_target_support(&ProbeType::StLink, "STM32F407VG"));
-        assert!(ProbeDiscovery::check_target_support(&ProbeType::DapLink, "nRF52832"));
-        assert!(!ProbeDiscovery::check_target_support(&ProbeType::StLink, "ESP32"));
+        assert!(ProbeDiscovery::check_target_support(
+            &ProbeType::JLink,
+            "STM32F407VG"
+        ));
+        assert!(ProbeDiscovery::check_target_support(
+            &ProbeType::StLink,
+            "STM32F407VG"
+        ));
+        assert!(ProbeDiscovery::check_target_support(
+            &ProbeType::DapLink,
+            "nRF52832"
+        ));
+        assert!(!ProbeDiscovery::check_target_support(
+            &ProbeType::StLink,
+            "ESP32"
+        ));
     }
 
     #[tokio::test]
@@ -225,7 +261,7 @@ mod tests {
         // In CI/testing environments, this might be empty
         let result = ProbeDiscovery::list_probes();
         assert!(result.is_ok());
-        
+
         let probes = result.unwrap();
         // Just verify the structure is correct
         for probe in probes {

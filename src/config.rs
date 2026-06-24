@@ -1,14 +1,14 @@
 //! Configuration management for the debugger MCP server
 
+use crate::error::{DebugError, Result};
+use clap::{Parser, Subcommand, ValueEnum};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use clap::Parser;
-use crate::error::{DebugError, Result};
 
 /// Command line arguments
 #[derive(Parser, Debug)]
-#[command(name = "debugger-mcp-rs")]
+#[command(name = "embedded-debugger-mcp")]
 #[command(about = "A Model Context Protocol server for embedded debugging")]
 #[command(version)]
 pub struct Args {
@@ -17,40 +17,40 @@ pub struct Args {
     pub config: Option<PathBuf>,
 
     /// Log level (error, warn, info, debug, trace)
-    #[arg(long, default_value = "info")]
-    pub log_level: String,
+    #[arg(long)]
+    pub log_level: Option<String>,
 
     /// Log file path
     #[arg(long)]
     pub log_file: Option<PathBuf>,
 
     /// Maximum number of concurrent debug sessions
-    #[arg(long, default_value = "5")]
-    pub max_sessions: usize,
+    #[arg(long)]
+    pub max_sessions: Option<usize>,
 
     /// Session timeout in seconds
-    #[arg(long, default_value = "3600")]
-    pub session_timeout: u64,
+    #[arg(long)]
+    pub session_timeout: Option<u64>,
 
     /// Default debugger speed in kHz
-    #[arg(long, default_value = "4000")]
-    pub default_speed: u32,
+    #[arg(long)]
+    pub default_speed: Option<u32>,
 
     /// Connection timeout in milliseconds
-    #[arg(long, default_value = "5000")]
-    pub connection_timeout: u64,
+    #[arg(long)]
+    pub connection_timeout: Option<u64>,
 
     /// Connection retry count
-    #[arg(long, default_value = "3")]
-    pub retry_count: u32,
+    #[arg(long)]
+    pub retry_count: Option<u32>,
 
     /// RTT buffer size in bytes
-    #[arg(long, default_value = "1024")]
-    pub rtt_buffer_size: usize,
+    #[arg(long)]
+    pub rtt_buffer_size: Option<usize>,
 
     /// RTT poll interval in milliseconds
-    #[arg(long, default_value = "10")]
-    pub rtt_poll_interval: u64,
+    #[arg(long)]
+    pub rtt_poll_interval: Option<u64>,
 
     /// Allow flash erase operations
     #[arg(long)]
@@ -71,6 +71,100 @@ pub struct Args {
     /// Show current configuration and exit
     #[arg(long)]
     pub show_config: bool,
+
+    /// CLI command to run. Defaults to serving MCP over stdio when omitted.
+    #[command(subcommand)]
+    pub command: Option<Command>,
+}
+
+/// Top-level CLI commands.
+#[derive(Subcommand, Debug, Clone, PartialEq, Eq)]
+pub enum Command {
+    /// Serve the MCP server over stdio.
+    Serve,
+    /// Configuration utilities.
+    Config {
+        #[command(subcommand)]
+        action: ConfigCommand,
+    },
+    /// Debug probe utilities.
+    Probes {
+        #[command(subcommand)]
+        action: ProbeCommand,
+    },
+    /// Run environment checks for CLI, MCP, and hardware discovery.
+    Doctor {
+        /// Emit machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Skill helper commands for agent-driven workflows.
+    Skill {
+        #[command(subcommand)]
+        action: SkillCommand,
+    },
+}
+
+/// Configuration CLI commands.
+#[derive(Subcommand, Debug, Clone, PartialEq, Eq)]
+pub enum ConfigCommand {
+    /// Print a default configuration file.
+    Generate,
+    /// Validate the effective configuration.
+    Validate,
+    /// Show the effective configuration.
+    Show,
+}
+
+/// Probe CLI commands.
+#[derive(Subcommand, Debug, Clone, PartialEq, Eq)]
+pub enum ProbeCommand {
+    /// List connected debug probes.
+    List {
+        /// Emit machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+/// Skill helper CLI commands.
+#[derive(Subcommand, Debug, Clone, PartialEq, Eq)]
+pub enum SkillCommand {
+    /// Print the default prompt for CLI+Skill workflows.
+    PrintPrompt,
+    /// Install the bundled skill for Codex and/or Claude Code.
+    Install {
+        /// Which assistant target to install for.
+        #[arg(long, value_enum, default_value = "both")]
+        target: SkillInstallTarget,
+
+        /// Override the user home directory used for installation.
+        #[arg(long)]
+        home: Option<PathBuf>,
+
+        /// Print planned writes without changing the filesystem.
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Replace existing installed skill/plugin directories.
+        #[arg(long)]
+        force: bool,
+
+        /// Emit machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+/// Supported skill installation targets.
+#[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SkillInstallTarget {
+    /// Install the Codex skill under ~/.codex/skills.
+    Codex,
+    /// Install Claude Code skill and local plugin-dir package under ~/.claude.
+    Claude,
+    /// Install both Codex and Claude Code targets.
+    Both,
 }
 
 /// Main configuration structure
@@ -104,13 +198,19 @@ impl Default for Config {
 impl Config {
     /// Load configuration from file or create default
     pub fn load(config_path: Option<&PathBuf>) -> Result<Self> {
+        let config = Self::load_unvalidated(config_path)?;
+        config.validate()?;
+        Ok(config)
+    }
+
+    /// Load configuration from file or create default without validating values.
+    pub fn load_unvalidated(config_path: Option<&PathBuf>) -> Result<Self> {
         if let Some(path) = config_path {
-            let content = std::fs::read_to_string(path)
-                .map_err(|e| DebugError::InvalidConfig(format!("Failed to read config file: {}", e)))?;
-            let config: Config = toml::from_str(&content)
-                .map_err(|e| DebugError::InvalidConfig(format!("Invalid TOML syntax: {}", e)))?;
-            config.validate()?;
-            Ok(config)
+            let content = std::fs::read_to_string(path).map_err(|e| {
+                DebugError::InvalidConfig(format!("Failed to read config file: {}", e))
+            })?;
+            toml::from_str(&content)
+                .map_err(|e| DebugError::InvalidConfig(format!("Invalid TOML syntax: {}", e)))
         } else {
             Ok(Config::default())
         }
@@ -118,29 +218,77 @@ impl Config {
 
     /// Merge command line arguments into configuration
     pub fn merge_args(&mut self, args: &Args) {
-        self.server.max_sessions = args.max_sessions;
-        self.server.session_timeout_seconds = args.session_timeout;
-        self.debugger.default_speed_khz = args.default_speed;
-        self.debugger.connection_timeout_ms = args.connection_timeout;
-        self.debugger.retry_count = args.retry_count;
-        self.rtt.buffer_size = args.rtt_buffer_size;
-        self.rtt.poll_interval_ms = args.rtt_poll_interval;
-        self.security.allow_flash_erase = args.allow_flash_erase;
-        self.security.restrict_memory_access = args.restrict_memory_access;
-        self.logging.level = args.log_level.clone();
-        self.logging.file = args.log_file.clone();
+        if let Some(max_sessions) = args.max_sessions {
+            self.server.max_sessions = max_sessions;
+        }
+        if let Some(session_timeout) = args.session_timeout {
+            self.server.session_timeout_seconds = session_timeout;
+        }
+        if let Some(default_speed) = args.default_speed {
+            self.debugger.default_speed_khz = default_speed;
+        }
+        if let Some(connection_timeout) = args.connection_timeout {
+            self.debugger.connection_timeout_ms = connection_timeout;
+        }
+        if let Some(retry_count) = args.retry_count {
+            self.debugger.retry_count = retry_count;
+        }
+        if let Some(rtt_buffer_size) = args.rtt_buffer_size {
+            self.rtt.buffer_size = rtt_buffer_size;
+        }
+        if let Some(rtt_poll_interval) = args.rtt_poll_interval {
+            self.rtt.poll_interval_ms = rtt_poll_interval;
+        }
+        if args.allow_flash_erase {
+            self.security.allow_flash_erase = true;
+        }
+        if args.restrict_memory_access {
+            self.security.restrict_memory_access = true;
+        }
+        if let Some(log_level) = &args.log_level {
+            self.logging.level = log_level.clone();
+        }
+        if let Some(log_file) = &args.log_file {
+            self.logging.file = Some(log_file.clone());
+        }
     }
 
     /// Validate configuration
     pub fn validate(&self) -> Result<()> {
         if self.server.max_sessions == 0 {
-            return Err(DebugError::InvalidConfig("max_sessions must be > 0".to_string()));
+            return Err(DebugError::InvalidConfig(
+                "max_sessions must be > 0".to_string(),
+            ));
         }
         if self.debugger.default_speed_khz == 0 {
-            return Err(DebugError::InvalidConfig("default_speed_khz must be > 0".to_string()));
+            return Err(DebugError::InvalidConfig(
+                "default_speed_khz must be > 0".to_string(),
+            ));
         }
         if self.rtt.buffer_size == 0 {
-            return Err(DebugError::InvalidConfig("rtt.buffer_size must be > 0".to_string()));
+            return Err(DebugError::InvalidConfig(
+                "rtt.buffer_size must be > 0".to_string(),
+            ));
+        }
+        if self.memory.max_read_size == 0 {
+            return Err(DebugError::InvalidConfig(
+                "memory.max_read_size must be > 0".to_string(),
+            ));
+        }
+        if self.memory.max_write_size == 0 {
+            return Err(DebugError::InvalidConfig(
+                "memory.max_write_size must be > 0".to_string(),
+            ));
+        }
+        if self.flash.max_binary_size == 0 {
+            return Err(DebugError::InvalidConfig(
+                "flash.max_binary_size must be > 0".to_string(),
+            ));
+        }
+        if self.security.max_file_size == 0 {
+            return Err(DebugError::InvalidConfig(
+                "security.max_file_size must be > 0".to_string(),
+            ));
         }
         Ok(())
     }
@@ -154,54 +302,68 @@ impl Config {
     /// Get default target configurations
     fn default_targets() -> HashMap<String, TargetConfig> {
         let mut targets = HashMap::new();
-        
-        targets.insert("stm32f407".to_string(), TargetConfig {
-            name: "STM32F407VG".to_string(),
-            chip: "STM32F407VGTx".to_string(),
-            architecture: "Cortex-M4".to_string(),
-            flash_size: 1048576,  // 1MB
-            ram_size: 196608,     // 192KB
-            flash_algorithm: "STM32F4xx".to_string(),
-            memory_regions: vec![
-                MemoryRegion {
-                    name: "Flash".to_string(),
-                    start: 0x08000000,
-                    end: 0x080FFFFF,
-                    access: "rx".to_string(),
-                },
-                MemoryRegion {
-                    name: "RAM".to_string(),
-                    start: 0x20000000,
-                    end: 0x2002FFFF,
-                    access: "rwx".to_string(),
-                },
-            ],
-        });
 
-        targets.insert("nrf52832".to_string(), TargetConfig {
-            name: "nRF52832".to_string(),
-            chip: "nrf52832_xxAA".to_string(),
-            architecture: "Cortex-M4F".to_string(),
-            flash_size: 524288,   // 512KB
-            ram_size: 65536,      // 64KB
-            flash_algorithm: "nRF52".to_string(),
-            memory_regions: vec![
-                MemoryRegion {
-                    name: "Flash".to_string(),
-                    start: 0x00000000,
-                    end: 0x0007FFFF,
-                    access: "rx".to_string(),
-                },
-                MemoryRegion {
-                    name: "RAM".to_string(),
-                    start: 0x20000000,
-                    end: 0x2000FFFF,
-                    access: "rwx".to_string(),
-                },
-            ],
-        });
+        targets.insert(
+            "stm32f407".to_string(),
+            TargetConfig {
+                name: "STM32F407VG".to_string(),
+                chip: "STM32F407VGTx".to_string(),
+                architecture: "Cortex-M4".to_string(),
+                flash_size: 1048576, // 1MB
+                ram_size: 196608,    // 192KB
+                flash_algorithm: "STM32F4xx".to_string(),
+                memory_regions: vec![
+                    MemoryRegion {
+                        name: "Flash".to_string(),
+                        start: 0x08000000,
+                        end: 0x080FFFFF,
+                        access: "rx".to_string(),
+                    },
+                    MemoryRegion {
+                        name: "RAM".to_string(),
+                        start: 0x20000000,
+                        end: 0x2002FFFF,
+                        access: "rwx".to_string(),
+                    },
+                ],
+            },
+        );
+
+        targets.insert(
+            "nrf52832".to_string(),
+            TargetConfig {
+                name: "nRF52832".to_string(),
+                chip: "nrf52832_xxAA".to_string(),
+                architecture: "Cortex-M4F".to_string(),
+                flash_size: 524288, // 512KB
+                ram_size: 65536,    // 64KB
+                flash_algorithm: "nRF52".to_string(),
+                memory_regions: vec![
+                    MemoryRegion {
+                        name: "Flash".to_string(),
+                        start: 0x00000000,
+                        end: 0x0007FFFF,
+                        access: "rx".to_string(),
+                    },
+                    MemoryRegion {
+                        name: "RAM".to_string(),
+                        start: 0x20000000,
+                        end: 0x2000FFFF,
+                        access: "rwx".to_string(),
+                    },
+                ],
+            },
+        );
 
         targets
+    }
+}
+
+impl From<usize> for Config {
+    fn from(max_sessions: usize) -> Self {
+        let mut config = Config::default();
+        config.server.max_sessions = max_sessions;
+        config
     }
 }
 
@@ -285,10 +447,10 @@ pub struct MemoryConfig {
 impl Default for MemoryConfig {
     fn default() -> Self {
         Self {
-            max_read_size: 65536,  // 64KB
-            max_write_size: 4096,  // 4KB
+            max_read_size: 65536, // 64KB
+            max_write_size: 4096, // 4KB
             cache_enable: true,
-            cache_size: 1048576,   // 1MB
+            cache_size: 1048576, // 1MB
         }
     }
 }
@@ -309,7 +471,7 @@ impl Default for FlashConfig {
             default_program_timeout_ms: 60000,
             verify_after_program: true,
             allow_erase: false,
-            max_binary_size: 10485760,  // 10MB
+            max_binary_size: 10485760, // 10MB
         }
     }
 }
@@ -330,7 +492,7 @@ impl Default for SecurityConfig {
             allow_memory_write: true,
             restrict_memory_access: false,
             allowed_file_paths: vec![],
-            max_file_size: 10485760,  // 10MB
+            max_file_size: 10485760, // 10MB
         }
     }
 }
@@ -351,7 +513,7 @@ pub struct MemoryRegion {
     pub name: String,
     pub start: u64,
     pub end: u64,
-    pub access: String,  // "r", "w", "x", "rw", "rx", "rwx"
+    pub access: String, // "r", "w", "x", "rw", "rx", "rwx"
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

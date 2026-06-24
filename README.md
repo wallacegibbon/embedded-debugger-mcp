@@ -1,247 +1,264 @@
 # Embedded Debugger MCP Server
 
-[![Rust](https://img.shields.io/badge/rust-1.70+-orange.svg)](https://rust-lang.org)
+[![Rust](https://img.shields.io/badge/rust-stable-orange.svg)](https://rust-lang.org)
 [![RMCP](https://img.shields.io/badge/RMCP-0.3.2-blue.svg)](https://github.com/modelcontextprotocol/rust-sdk)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-A professional Model Context Protocol (MCP) server for embedded debugging with probe-rs. Provides AI assistants with comprehensive debugging capabilities for embedded systems including ARM Cortex-M, RISC-V microcontrollers with real hardware integration.
+Embedded Debugger MCP is a Rust server for embedded debugging through
+probe-rs. It exposes MCP tools for AI assistants and also includes a small CLI
+and bundled skill for users who want a command-driven workflow without setting
+up an MCP client first.
 
-> 📖 **Language Versions**: [English](README.md) | [中文](README_zh.md)
+Language versions: [English](README.md) | [中文](README_zh.md)
 
-## ✨ Features
+## What It Provides
 
-- 🚀 **Production Ready**: Real hardware integration with 22 comprehensive debugging tools
-- 🔌 **Multi-Probe Support**: J-Link, ST-Link V2/V3, DAPLink, Black Magic Probe
-- 🎯 **Complete Debug Control**: Connect, halt, run, reset, single-step execution  
-- 💾 **Memory Operations**: Read/write flash and RAM with multiple data formats
-- 🛑 **Breakpoint Management**: Hardware and software breakpoints with real-time control
-- 📱 **Flash Programming**: Complete flash operations - erase, program, verify
-- 📡 **RTT Bidirectional**: Real-Time Transfer with interactive command/response system
-- 🏗️ **Multi-Architecture**: ARM Cortex-M, RISC-V with tested STM32 integration
-- 🤖 **AI Integration**: Perfect compatibility with Claude and other AI assistants
-- 🧪 **Comprehensive Testing**: All 22 tools validated with real STM32G431CBTx hardware
+- MCP tools for probe discovery, target connection, core control, memory access,
+  breakpoints, flash programming, and RTT communication.
+- CLI commands for environment checks, configuration inspection, probe listing,
+  MCP serving, and skill prompt handoff.
+- A Codex/Claude Code compatible skill at `skills/embedded-debugger`.
+- Release checks covering rustfmt, clippy, tests, docs, packaging, and the STM32
+  demo build.
 
-## 🏗️ Architecture
+## Architecture
 
-```
-┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│   MCP Client    │◄──►│  Embedded        │◄──►│  Debug Probe    │
-│   (Claude/AI)   │    │  Debugger MCP    │    │  Hardware       │
-└─────────────────┘    └──────────────────┘    └─────────────────┘
-                              │
-                              ▼
-                       ┌──────────────────┐
-                       │  Target Device   │
-                       │  (ARM/RISC-V)    │
-                       └──────────────────┘
+```text
+MCP client or CLI
+        |
+        v
+embedded-debugger-mcp
+        |
+        v
+probe-rs -> debug probe -> target MCU
 ```
 
-## 🚀 Quick Start
+## Requirements
 
-### Prerequisites
+- Rust stable toolchain.
+- A probe-rs compatible debug probe such as ST-Link, J-Link, DAPLink, Black
+  Magic Probe, or a supported FTDI-based probe.
+- A supported target chip and working SWD/JTAG wiring for hardware operations.
+- Nightly Rust plus `rust-src` for the bundled STM32 demo firmware check.
 
-**Hardware Requirements:**
-- **Debug Probe**: ST-Link V2/V3, J-Link, or DAPLink compatible probe
-- **Target Board**: STM32 or other supported microcontroller
-- **Connection**: USB cables for probe and target board
-
-**Software Requirements:**
-- Rust 1.70+ 
-- probe-rs compatible debug probe drivers
-
-### Installation
+## Build
 
 ```bash
-# Clone and build from source
 git clone https://github.com/adancurusul/embedded-debugger-mcp.git
 cd embedded-debugger-mcp
 cargo build --release
 ```
 
-### Basic Usage
+The binary is `target/release/embedded-debugger-mcp`.
 
-**Configure MCP Clients**
+## MCP Mode
 
-#### Claude Desktop Configuration Example
-
-Add to Claude Desktop configuration file:
-
-**Windows Example:**
-```json
-{
-  "mcpServers": {
-    "embedded-debugger": {
-      "command": "C:\\path\\to\\debugger-mcp-rs\\target\\release\\embedded-debugger-mcp.exe",
-      "args": [],
-      "env": {
-        "RUST_LOG": "info"
-      }
-    }
-  }
-}
-```
-
-**macOS/Linux Example:**
-```json
-{
-  "mcpServers": {
-    "embedded-debugger": {
-      "command": "/path/to/debugger-mcp-rs/target/release/embedded-debugger-mcp",
-      "args": [],
-      "env": {
-        "RUST_LOG": "info"
-      }
-    }
-  }
-}
-```
-
-Other examples for other tools like cursor ,claude code  etc. please refer to the corresponding tool documentation
-
-## 🎯 Try the STM32 Demo
-
-We provide a comprehensive **STM32 RTT Bidirectional Demo** that showcases all capabilities:
+Run the server explicitly:
 
 ```bash
-# Navigate to the example
+embedded-debugger-mcp serve
+```
+
+For compatibility, running `embedded-debugger-mcp` without a subcommand also
+serves MCP over stdio.
+
+Example MCP client configuration:
+
+```json
+{
+  "mcpServers": {
+    "embedded-debugger": {
+      "command": "/path/to/embedded-debugger-mcp/target/release/embedded-debugger-mcp",
+      "args": ["serve"],
+      "env": {
+        "RUST_LOG": "info"
+      }
+    }
+  }
+}
+```
+
+On Windows, use the `.exe` path and Windows path separators.
+
+## CLI And Skill Mode
+
+CLI mode is useful for setup checks, automation, and agent workflows before an
+MCP client is configured.
+
+```bash
+embedded-debugger-mcp doctor
+embedded-debugger-mcp doctor --json
+embedded-debugger-mcp probes list
+embedded-debugger-mcp probes list --json
+embedded-debugger-mcp config generate
+embedded-debugger-mcp config validate
+embedded-debugger-mcp config show
+embedded-debugger-mcp skill print-prompt
+embedded-debugger-mcp skill install --target both
+```
+
+The bundled skill lives in:
+
+```text
+skills/embedded-debugger/
+```
+
+It is written as a plain Codex skill and is also packaged for Claude Code with
+`.claude-plugin/plugin.json`. The skill starts with CLI checks and uses MCP
+tools only when an MCP client is available.
+
+Install the skill for Codex and Claude Code:
+
+```bash
+embedded-debugger-mcp skill install --target both
+```
+
+Preview or automate the install with JSON:
+
+```bash
+embedded-debugger-mcp skill install --target both --dry-run --json
+embedded-debugger-mcp skill install --target both --force --json
+```
+
+`--target` accepts `codex`, `claude`, or `both`. The command installs the Codex
+skill under `~/.codex/skills/embedded-debugger`, the Claude Code skill under
+`~/.claude/skills/embedded-debugger`, and a local Claude plugin-dir package under
+`~/.claude/plugins/local/embedded-debugger-mcp`. Existing directories are not
+replaced unless `--force` is passed.
+
+Trigger the Codex skill with a prompt such as:
+
+```text
+Use $embedded-debugger to inspect my embedded target setup.
+```
+
+Load the installed Claude Code plugin package:
+
+```bash
+claude --plugin-dir ~/.claude/plugins/local/embedded-debugger-mcp --print '/embedded-debugger inspect my embedded target setup'
+```
+
+For skill-only environments, the same `skills/embedded-debugger` directory can
+also be copied to a local skills directory.
+
+Validate the skill package:
+
+```bash
+python3 .github/scripts/validate_skill.py skills/embedded-debugger
+python3 ~/.codex/skills/.system/skill-creator/scripts/quick_validate.py skills/embedded-debugger
+claude plugin validate .
+embedded-debugger-mcp skill install --target both --home /tmp/embedded-debugger-skill-home --force --json
+```
+
+The first command validates the repository skill metadata, the second validates
+the standard `SKILL.md` layout when the Codex skill creator validator is
+installed, and the third validates the Claude Code plugin manifest.
+
+## MCP Tool Set
+
+Probe management:
+
+| Tool | Purpose |
+|------|---------|
+| `list_probes` | Discover connected debug probes. |
+| `connect` | Open a probe session for a target chip. |
+| `probe_info` | Show active session information. |
+
+Target control:
+
+| Tool | Purpose |
+|------|---------|
+| `halt` | Halt core execution. |
+| `run` | Resume execution. |
+| `reset` | Reset the core. Only the implemented hardware-style reset path is accepted. |
+| `step` | Single-step one instruction. |
+| `get_status` | Read core/session status. |
+| `disconnect` | Drop the session and clean up resources. |
+
+Memory and breakpoints:
+
+| Tool | Purpose |
+|------|---------|
+| `read_memory` | Read target memory with configured size/range limits. |
+| `write_memory` | Write target memory when enabled by configuration. |
+| `set_breakpoint` | Set a hardware breakpoint. |
+| `clear_breakpoint` | Clear a hardware breakpoint. |
+
+Flash:
+
+| Tool | Purpose |
+|------|---------|
+| `flash_erase` | Erase flash when erase permissions are enabled. |
+| `flash_program` | Program ELF, HEX, or BIN files through probe-rs flash algorithms. |
+| `flash_verify` | Compare raw expected data with target flash contents. |
+| `run_firmware` | Erase, program, reset/run, and optionally attach RTT. |
+
+RTT:
+
+| Tool | Purpose |
+|------|---------|
+| `rtt_attach` | Attach to a SEGGER RTT control block. |
+| `rtt_detach` | Detach RTT. |
+| `rtt_channels` | List discovered RTT channels. |
+| `rtt_read` | Read from an up channel with max byte and timeout limits. |
+| `rtt_write` | Write to a down channel. |
+
+## Safety Notes
+
+- Flash erase is disabled unless `security.allow_flash_erase` or
+  `flash.allow_erase` is enabled.
+- Memory writes are controlled by `security.allow_memory_write`.
+- Optional memory range restriction uses target memory regions in the
+  configuration.
+- Firmware file paths are canonicalized, checked against
+  `security.allowed_file_paths` when configured, and checked against size
+  limits.
+- Sector erase by arbitrary address is rejected until target-specific sector
+  mapping is implemented.
+- `flash_verify` supports raw data comparison. Use raw BIN files or hex data for
+  file-based verification.
+
+Generate a starting configuration:
+
+```bash
+embedded-debugger-mcp config generate > embedded-debugger.toml
+embedded-debugger-mcp --config embedded-debugger.toml config validate
+```
+
+## STM32 Demo
+
+The STM32 RTT demo is in `examples/STM32_demo`.
+
+```bash
 cd examples/STM32_demo
-
-# Build the firmware  
-cargo build --release
-
-# Use with MCP server for complete debugging experience
+CARGO_TARGET_DIR=/tmp/embedded-debugger-mcp-stm32-target cargo +nightly check --locked
 ```
 
-**What the demo shows:**
-- ✅ **Interactive RTT Communication**: Send commands and get real-time responses
-- ✅ **All 22 MCP Tools**: Complete validation with real STM32 hardware
-- ✅ **Fibonacci Calculator**: Live data streaming with control commands
-- ✅ **Hardware Integration**: Tested with STM32G431CBTx + ST-Link V2
+The demo firmware shows multi-channel RTT communication and is intended as a
+hardware validation aid. See [examples/STM32_demo/README.md](examples/STM32_demo/README.md).
 
-[📖 View STM32 Demo Documentation →](examples/STM32_demo/README.md)
+## Release Checks
 
-### Usage Examples with AI Assistants
+Run these before cutting a release:
 
-#### List Available Debug Probes
-```
-Please list available debug probes on the system
-```
-
-#### Connect and Flash Firmware
-```
-Connect to my STM32G431CBTx using ST-Link probe, then flash the firmware at examples/STM32_demo/target/thumbv7em-none-eabi/release/STM32_demo
-```
-
-#### Interactive RTT Communication
-```
-Please attach RTT and show me the data from the terminal channel. Then send a command 'L' to toggle the LED.
+```bash
+cargo fmt --all -- --check
+cargo clippy --locked --all-targets --all-features -- -D warnings
+cargo test --locked --all-targets --all-features
+RUSTDOCFLAGS="-D warnings" cargo doc --locked --all-features --no-deps
+cargo package --locked
+python3 .github/scripts/validate_skill.py skills/embedded-debugger
+claude plugin validate .
+embedded-debugger-mcp skill install --target both --home /tmp/embedded-debugger-skill-home --force --json
+(cd examples/STM32_demo && CARGO_TARGET_DIR=/tmp/embedded-debugger-mcp-stm32-target cargo +nightly check --locked)
 ```
 
-#### Memory Analysis
-```
-Read 64 bytes of memory from address 0x08000000 and analyze the data format
-```
+## Acknowledgments
 
-#### Test All 22 MCP Tools
-```
-Please help me test all 22 MCP embedded debugger tools with my STM32 board. Start by connecting to the probe, then systematically test each tool category: probe management, memory operations, debug control, breakpoints, flash operations, RTT communication, and session management.
-```
+- [probe-rs](https://probe.rs/) for embedded debug probe support.
+- [rmcp](https://github.com/modelcontextprotocol/rust-sdk) for the Rust MCP SDK.
+- [tokio](https://tokio.rs/) for the async runtime.
 
-## 🛠️ Complete Tool Set (22 Tools)
+## License
 
-All tools tested and validated with real STM32 hardware:
-
-### 🔌 Probe Management (3 tools)
-| Tool | Description | Status |
-|------|-------------|---------|
-| `list_probes` | Discover available debug probes | ✅ Production Ready |
-| `connect` | Connect to probe and target chip | ✅ Production Ready |
-| `probe_info` | Get detailed session information | ✅ Production Ready |
-
-### 💾 Memory Operations (2 tools) 
-| Tool | Description | Status |
-|------|-------------|---------|
-| `read_memory` | Read flash/RAM with multiple formats | ✅ Production Ready |
-| `write_memory` | Write to target memory | ✅ Production Ready |
-
-### 🎯 Debug Control (4 tools)
-| Tool | Description | Status |
-|------|-------------|---------|
-| `halt` | Stop target execution | ✅ Production Ready |
-| `run` | Resume target execution | ✅ Production Ready |
-| `reset` | Hardware/software reset | ✅ Production Ready |
-| `step` | Single instruction stepping | ✅ Production Ready |
-
-### 🛑 Breakpoint Management (2 tools)
-| Tool | Description | Status |
-|------|-------------|---------|
-| `set_breakpoint` | Set hardware/software breakpoints | ✅ Production Ready |
-| `clear_breakpoint` | Remove breakpoints | ✅ Production Ready |
-
-### 📱 Flash Operations (3 tools)
-| Tool | Description | Status |
-|------|-------------|---------|
-| `flash_erase` | Erase flash memory sectors/chip | ✅ Production Ready |
-| `flash_program` | Program ELF/HEX/BIN files | ✅ Production Ready |
-| `flash_verify` | Verify flash contents | ✅ Production Ready |
-
-### 📡 RTT Communication (6 tools)
-| Tool | Description | Status |
-|------|-------------|---------|
-| `rtt_attach` | Connect to RTT communication | ✅ Production Ready |
-| `rtt_detach` | Disconnect RTT | ✅ Production Ready |
-| `rtt_channels` | List available RTT channels | ✅ Production Ready |
-| `rtt_read` | Read from RTT up channels | ✅ Production Ready |
-| `rtt_write` | Write to RTT down channels | ✅ Production Ready |
-| `run_firmware` | Complete deployment + RTT | ✅ Production Ready |
-
-### 📊 Session Management (2 tools)
-| Tool | Description | Status |
-|------|-------------|---------|
-| `get_status` | Get current debug status | ✅ Production Ready |
-| `disconnect` | Clean session termination | ✅ Production Ready |
-
-**✅ 22/22 Tools - 100% Success Rate with Real Hardware**
-
-## 🌍 Supported Hardware
-
-### Debug Probes
-- **J-Link**: Segger J-Link (all variants)
-- **ST-Link**: ST-Link/V2, ST-Link/V3
-- **DAPLink**: ARM DAPLink compatible probes
-- **Black Magic Probe**: Black Magic Probe
-- **FTDI**: FTDI-based debug probes
-
-### Target Architectures
-- **ARM Cortex-M**: M0, M0+, M3, M4, M7, M23, M33
-- **RISC-V**: Various RISC-V cores
-- **ARM Cortex-A**: Basic support
-
-## 🏆 Production Status
-
-### ✅ Fully Implemented and Tested
-
-**Current Status: PRODUCTION READY**
-
-- ✅ **Complete probe-rs Integration**: Real hardware debugging with all 22 tools
-- ✅ **Hardware Validation**: Tested with STM32G431CBTx + ST-Link V2
-- ✅ **RTT Bidirectional**: Full interactive communication with real-time commands
-- ✅ **Flash Operations**: Complete erase, program, verify workflow
-- ✅ **Session Management**: Multi-session support with robust error handling
-- ✅ **AI Integration**: Perfect MCP protocol compatibility
-
-## 🙏 Acknowledgments
-
-Thanks to the following open source projects:
-
-- [probe-rs](https://probe.rs/) - Embedded debugging toolkit
-- [rmcp](https://github.com/modelcontextprotocol/rust-sdk) - Rust MCP SDK
-- [tokio](https://tokio.rs/) - Async runtime
-
-## 📄 License
-
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
-
----
-
-⭐ If this project helps you, please give us a Star!
+This project is licensed under the MIT License. See [LICENSE](LICENSE).

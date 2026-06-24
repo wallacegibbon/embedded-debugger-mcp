@@ -3,11 +3,5 @@
 pub mod manager;
 
 pub use manager::{
-    FlashManager, 
-    EraseType, 
-    FileFormat, 
-    EraseResult, 
-    ProgramResult, 
-    VerifyResult, 
-    VerifyMismatch
+    EraseResult, EraseType, FileFormat, FlashManager, ProgramResult, VerifyMismatch, VerifyResult,
 };

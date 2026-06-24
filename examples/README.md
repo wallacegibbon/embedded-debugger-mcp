@@ -1,21 +1,28 @@
-# MCP Embedded Debugger Examples
+# Embedded Debugger Examples
 
-This directory contains examples and utilities demonstrating the capabilities of the MCP embedded debugger.
+This directory contains example firmware and notes for exercising
+embedded-debugger-mcp with real hardware.
 
-## Examples
+## STM32_demo
 
-### 🚀 [STM32_demo](STM32_demo/)
+[STM32_demo](STM32_demo/) is an RTT bidirectional communication demo for an
+STM32G431CBTx-class target.
 
-**Complete RTT Bidirectional Communication Demo**
+It demonstrates:
 
-A comprehensive example showcasing all 22 MCP embedded debugger tools with real STM32 hardware:
+- 5 RTT channels: 3 up channels and 2 down channels.
+- Interactive command/response over RTT.
+- Fibonacci data streaming with runtime control.
+- A target firmware that can be used while testing MCP flash, debug, and RTT
+  workflows.
 
-- **5-Channel RTT**: Bidirectional communication (3 up + 2 down channels)
-- **Interactive Debugging**: Real-time command/response system  
-- **Data Streaming**: Continuous Fibonacci calculations with control
-- **Complete Testing**: Validates all 22 MCP tools with 100% success rate
+Hardware used during development: STM32G431CBTx with ST-Link V2.
 
-**Hardware**: STM32G431CBTx + ST-Link V2  
-**Status**: ✅ Production Ready
+Build check:
 
-[View STM32_demo Documentation →](STM32_demo/README.md)
+```bash
+cd STM32_demo
+CARGO_TARGET_DIR=/tmp/embedded-debugger-mcp-stm32-target cargo +nightly check --locked
+```
+
+See [STM32_demo/README.md](STM32_demo/README.md).
