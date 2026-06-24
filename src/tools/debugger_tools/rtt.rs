@@ -387,7 +387,7 @@ impl EmbeddedDebuggerToolHandler {
 
             if channels.is_empty() {
                 let message = format!(
-                    "📋 RTT Channels\n\n\
+                    "RTT Channels\n\n\
                     Session ID: {}\n\n\
                     No RTT channels available.",
                     args.session_id
@@ -395,7 +395,7 @@ impl EmbeddedDebuggerToolHandler {
                 return Ok(CallToolResult::success(vec![Content::text(message)]));
             }
 
-            let mut message = format!("📋 RTT Channels\n\nSession ID: {}\n\n", args.session_id);
+            let mut message = format!("RTT Channels\n\nSession ID: {}\n\n", args.session_id);
 
             // Group channels by direction
             let mut up_channels = Vec::new();
