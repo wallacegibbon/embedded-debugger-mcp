@@ -1,5 +1,4 @@
-use rmcp::{handler::server::tool::Parameters, model::*, tool, tool_router, ErrorData as McpError};
-use std::future::Future;
+use rmcp::{handler::server::wrapper::Parameters, model::*, tool, tool_router, ErrorData as McpError};
 use tracing::{debug, error, info, warn};
 
 use super::session::EmbeddedDebuggerToolHandler;
@@ -59,7 +58,7 @@ impl EmbeddedDebuggerToolHandler {
                             );
 
                             info!("Halt completed for session: {}", args.session_id);
-                            Ok(CallToolResult::success(vec![Content::text(message)]))
+                            Ok(CallToolResult::success(vec![ContentBlock::text(message)]))
                         }
                         Err(e) => {
                             warn!("Failed to get status after halt: {}", e);
@@ -69,7 +68,7 @@ impl EmbeddedDebuggerToolHandler {
                                 State: Halted\n",
                                 args.session_id
                             );
-                            Ok(CallToolResult::success(vec![Content::text(message)]))
+                            Ok(CallToolResult::success(vec![ContentBlock::text(message)]))
                         }
                     }
                 }
@@ -118,7 +117,7 @@ impl EmbeddedDebuggerToolHandler {
                     );
 
                     info!("Run completed for session: {}", args.session_id);
-                    Ok(CallToolResult::success(vec![Content::text(message)]))
+                    Ok(CallToolResult::success(vec![ContentBlock::text(message)]))
                 }
                 Err(e) => {
                     error!(
@@ -208,7 +207,7 @@ impl EmbeddedDebuggerToolHandler {
                     );
 
                     info!("Reset completed for session: {}", args.session_id);
-                    Ok(CallToolResult::success(vec![Content::text(message)]))
+                    Ok(CallToolResult::success(vec![ContentBlock::text(message)]))
                 }
                 Err(e) => {
                     error!(
@@ -268,7 +267,7 @@ impl EmbeddedDebuggerToolHandler {
                     );
 
                     info!("Step completed for session: {}", args.session_id);
-                    Ok(CallToolResult::success(vec![Content::text(message)]))
+                    Ok(CallToolResult::success(vec![ContentBlock::text(message)]))
                 }
                 Err(e) => {
                     error!(
@@ -348,7 +347,7 @@ impl EmbeddedDebuggerToolHandler {
                         (chrono::Utc::now() - session_arc.created_at).num_seconds() as f64 / 60.0
                     );
 
-                    Ok(CallToolResult::success(vec![Content::text(message)]))
+                    Ok(CallToolResult::success(vec![ContentBlock::text(message)]))
                 }
                 Err(e) => {
                     error!(

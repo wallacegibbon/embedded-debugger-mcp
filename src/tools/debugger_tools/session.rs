@@ -69,6 +69,17 @@ impl Default for EmbeddedDebuggerToolHandler {
     }
 }
 
+impl EmbeddedDebuggerToolHandler {
+    /// Combined tool router for use with #[tool_handler]
+    pub fn combined_tool_router() -> ToolRouter<Self> {
+        Self::management_tool_router()
+            + Self::target_control_tool_router()
+            + Self::memory_tool_router()
+            + Self::rtt_tool_router()
+            + Self::flash_tool_router()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

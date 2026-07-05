@@ -1,5 +1,4 @@
-use rmcp::{handler::server::tool::Parameters, model::*, tool, tool_router, ErrorData as McpError};
-use std::future::Future;
+use rmcp::{handler::server::wrapper::Parameters, model::*, tool, tool_router, ErrorData as McpError};
 use tracing::{debug, error, info};
 
 use super::formatting::{format_memory_data, parse_address, parse_data};
@@ -69,7 +68,7 @@ impl EmbeddedDebuggerToolHandler {
                     );
 
                     info!("Memory read completed for session: {}", args.session_id);
-                    Ok(CallToolResult::success(vec![Content::text(message)]))
+                    Ok(CallToolResult::success(vec![ContentBlock::text(message)]))
                 }
                 Err(e) => {
                     error!(
@@ -153,7 +152,7 @@ impl EmbeddedDebuggerToolHandler {
                     );
 
                     info!("Memory write completed for session: {}", args.session_id);
-                    Ok(CallToolResult::success(vec![Content::text(message)]))
+                    Ok(CallToolResult::success(vec![ContentBlock::text(message)]))
                 }
                 Err(e) => {
                     error!(
@@ -236,7 +235,7 @@ impl EmbeddedDebuggerToolHandler {
                         "Breakpoint set for session: {} at 0x{:08X}",
                         args.session_id, address
                     );
-                    Ok(CallToolResult::success(vec![Content::text(message)]))
+                    Ok(CallToolResult::success(vec![ContentBlock::text(message)]))
                 }
                 Err(e) => {
                     error!(
@@ -313,7 +312,7 @@ impl EmbeddedDebuggerToolHandler {
                         "Breakpoint cleared for session: {} at 0x{:08X}",
                         args.session_id, address
                     );
-                    Ok(CallToolResult::success(vec![Content::text(message)]))
+                    Ok(CallToolResult::success(vec![ContentBlock::text(message)]))
                 }
                 Err(e) => {
                     error!(

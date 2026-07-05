@@ -1,5 +1,4 @@
-use rmcp::{handler::server::tool::Parameters, model::*, tool, tool_router, ErrorData as McpError};
-use std::future::Future;
+use rmcp::{handler::server::wrapper::Parameters, model::*, tool, tool_router, ErrorData as McpError};
 use tracing::{debug, error, info, warn};
 
 use super::formatting::{parse_address, parse_data};
@@ -59,6 +58,17 @@ impl EmbeddedDebuggerToolHandler {
             }
         };
 
+        // Halt the CPU first - required for RISC-V targets where
+        // the flash algorithm's reset_and_halt may not work reliably.
+        info!("Halting CPU before flash erase");
+        {
+            let mut session = session_arc.session.lock().await;
+            let core_result = session.core(0);
+            if let Ok(mut core) = core_result {
+                let _ = core.halt(std::time::Duration::from_millis(1000));
+            }
+        }
+
         // Perform erase operation
         {
             let mut session = session_arc.session.lock().await;
@@ -81,7 +91,7 @@ impl EmbeddedDebuggerToolHandler {
                     );
 
                     info!("Flash erase completed for session: {}", args.session_id);
-                    Ok(CallToolResult::success(vec![Content::text(message)]))
+                    Ok(CallToolResult::success(vec![ContentBlock::text(message)]))
                 }
                 Err(e) => {
                     error!("Flash erase failed for session {}: {}", args.session_id, e);
@@ -138,6 +148,16 @@ impl EmbeddedDebuggerToolHandler {
             None
         };
 
+        // Halt CPU first - required for RISC-V flash operations
+        info!("Halting CPU before flash program");
+        {
+            let mut session = session_arc.session.lock().await;
+            let core_result = session.core(0);
+            if let Ok(mut core) = core_result {
+                let _ = core.halt(std::time::Duration::from_millis(1000));
+            }
+        }
+
         // Perform programming operation
         {
             let mut session = session_arc.session.lock().await;
@@ -177,7 +197,7 @@ impl EmbeddedDebuggerToolHandler {
                         "Flash programming completed for session: {}",
                         args.session_id
                     );
-                    Ok(CallToolResult::success(vec![Content::text(message)]))
+                    Ok(CallToolResult::success(vec![ContentBlock::text(message)]))
                 }
                 Err(e) => {
                     error!(
@@ -345,9 +365,9 @@ impl EmbeddedDebuggerToolHandler {
                         args.session_id
                     );
                     if result.success {
-                        Ok(CallToolResult::success(vec![Content::text(message)]))
+                        Ok(CallToolResult::success(vec![ContentBlock::text(message)]))
                     } else {
-                        Ok(CallToolResult::error(vec![Content::text(message)]))
+                        Ok(CallToolResult::error(vec![ContentBlock::text(message)]))
                     }
                 }
                 Err(e) => {
@@ -384,6 +404,16 @@ impl EmbeddedDebuggerToolHandler {
 
         let mut status_messages = Vec::new();
         let start_time = std::time::Instant::now();
+
+        // Halt CPU first - required for RISC-V flash operations
+        info!("Halting CPU before firmware update");
+        {
+            let mut session = session_arc.session.lock().await;
+            let core_result = session.core(0);
+            if let Ok(mut core) = core_result {
+                let _ = core.halt(std::time::Duration::from_millis(1000));
+            }
+        }
 
         // Step 1: Erase flash
         status_messages.push("Step 1/5: Erasing flash memory...".to_string());
@@ -630,7 +660,7 @@ impl EmbeddedDebuggerToolHandler {
             args.session_id,
             elapsed.as_secs_f64()
         );
-        Ok(CallToolResult::success(vec![Content::text(message)]))
+        Ok(CallToolResult::success(vec![ContentBlock::text(message)]))
     }
 }
 

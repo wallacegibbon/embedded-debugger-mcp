@@ -1,12 +1,77 @@
-use rmcp::{handler::server::tool::Parameters, model::*, tool, tool_router, ErrorData as McpError};
-use std::future::Future;
+use rmcp::{handler::server::wrapper::Parameters, model::*, tool, tool_router, ErrorData as McpError};
 use std::sync::Arc;
 use tracing::{debug, error, info};
 
 use super::session::{DebugSession, EmbeddedDebuggerToolHandler};
 use crate::rtt::RttManager;
 use crate::tools::types::*;
-use probe_rs::{probe::list::Lister, Permissions};
+use probe_rs::{config::Registry, probe::list::Lister, Permissions};
+
+/// Custom target definitions (YAML) for chips not in the built-in probe-rs database.
+const CUSTOM_TARGETS_YAML: &str = r#"
+name: GD32VF1 Series
+manufacturer:
+  id: 0x48
+  cc: 0x6
+variants:
+- name: GD32VF103C8T6
+  cores:
+  - name: main
+    type: riscv
+    core_access_options: !Riscv
+  memory_map:
+  - !Nvm
+    range:
+      start: 0x8000000
+      end: 0x8010000
+    cores:
+    - main
+    access:
+      boot: true
+  - !Ram
+    range:
+      start: 0x20000000
+      end: 0x20005000
+    cores:
+    - main
+  flash_algorithms:
+  - gd32vf103
+flash_algorithms:
+- name: gd32vf103
+  description: GD32VF103 128 KB internal flash
+  default: true
+  instructions: tyUCQAlGkMnIyYhJE2UFBBOGBQEIwshFBYl1/bclAkAjqAUAyEURiRHlyEUTdgUBAUUBxlFFyMUFRYKANxUCQAxBk+UVAAzBDEGJifXdNxUCQExB8ZkTBkUADMJMQbGJ9f03FQJADEE3BgD/fRbxjQzBTEE3xsLfPQbxjTcGKCATBgZA0Y1MwQxBNwYAAdGNDMG3BQACEEFtjnXeNxUCQExB8ZmT5SUAEwZFAAzCoUVQQTGK4x62/jclAkAMSZP1BQiZybcFZ0WThTUSTMG3le/Nk4W1mkzBAUWCgIFGNycCQIVHHMuT98X/Mwj2AIXNYwsGA4MoBgD9FZOXJgCqlyOgFwFcR4WL9f9cR5GLkedcRxEGwYuFBvnbNyUCQCMiBQAFRYKAAUWCgDclAkCTBQAIDMkBRYKAAAAAAA==
+  pc_init: 0x3c
+  pc_uninit: 0x12a
+  pc_program_page: 0xdc
+  pc_erase_sector: 0x0
+  data_section_offset: 0x138
+  flash_properties:
+    address_range:
+      start: 0x8000000
+      end: 0x8020000
+    page_size: 0x400
+    erased_byte_value: 0xff
+    program_page_timeout: 100
+    erase_sector_timeout: 6000
+    sectors:
+    - size: 0x400
+      address: 0x0
+  cores:
+  - main
+"#;
+
+/// Build a probe-rs registry that includes custom target definitions
+/// (e.g., GD32VF103C8T6 which is not in the built-in database).
+fn build_custom_registry() -> Registry {
+    let mut registry = Registry::from_builtin_families();
+
+    if let Err(e) = registry.add_target_family_from_yaml(CUSTOM_TARGETS_YAML) {
+        tracing::warn!("Failed to load custom target GD32VF103C8T6: {e}");
+    }
+
+    registry
+}
 
 #[tool_router(router = management_tool_router, vis = "pub")]
 impl EmbeddedDebuggerToolHandler {
@@ -47,7 +112,7 @@ impl EmbeddedDebuggerToolHandler {
         };
 
         info!("Listed {} debug probes", probes.len());
-        Ok(CallToolResult::success(vec![Content::text(message)]))
+        Ok(CallToolResult::success(vec![ContentBlock::text(message)]))
     }
 
     #[tool(description = "Connect to a debug probe and target chip")]
@@ -97,6 +162,16 @@ impl EmbeddedDebuggerToolHandler {
                 info!("Opening probe: {}", probe_info.identifier);
                 match probe_info.open() {
                     Ok(mut probe) => {
+                        // Force JTAG mode for RISC-V targets (JLink may be stuck in SWD mode)
+                        if args.target_chip.to_lowercase().contains("risc")
+                            || args.target_chip.to_lowercase().contains("gd32vf")
+                            || args.target_chip.to_lowercase().contains("ch32")
+                            || args.target_chip.to_lowercase().contains("fe310")
+                        {
+                            info!("Target appears to be RISC-V, forcing JTAG protocol");
+                            let _ = probe.select_protocol(probe_rs::probe::WireProtocol::Jtag);
+                        }
+
                         let actual_speed = probe.set_speed(args.speed_khz).map_err(|e| {
                             McpError::internal_error(
                                 format!(
@@ -119,10 +194,11 @@ impl EmbeddedDebuggerToolHandler {
                             args.halt_after_connect || self.config.debugger.halt_on_connect;
 
                         info!("Attaching to target: {}", args.target_chip);
+                        let registry = build_custom_registry();
                         let attach_result = if connect_under_reset {
-                            probe.attach_under_reset(&args.target_chip, permissions)
+                            probe.attach_under_reset_with_registry(&args.target_chip, permissions, &registry)
                         } else {
-                            probe.attach(&args.target_chip, permissions)
+                            probe.attach_with_registry(&args.target_chip, permissions, &registry)
                         };
 
                         match attach_result {
@@ -191,7 +267,7 @@ impl EmbeddedDebuggerToolHandler {
                                 );
 
                                 info!("Created debug session: {}", session_id);
-                                Ok(CallToolResult::success(vec![Content::text(message)]))
+                                Ok(CallToolResult::success(vec![ContentBlock::text(message)]))
                             }
                             Err(e) => {
                                 error!("Failed to attach to target '{}': {}", args.target_chip, e);
@@ -269,7 +345,7 @@ impl EmbeddedDebuggerToolHandler {
                 );
 
                 info!("Disconnected debug session: {}", args.session_id);
-                Ok(CallToolResult::success(vec![Content::text(message)]))
+                Ok(CallToolResult::success(vec![ContentBlock::text(message)]))
             }
             None => {
                 let error_msg = format!(
@@ -315,6 +391,6 @@ impl EmbeddedDebuggerToolHandler {
         );
 
         info!("Retrieved probe info for session: {}", args.session_id);
-        Ok(CallToolResult::success(vec![Content::text(message)]))
+        Ok(CallToolResult::success(vec![ContentBlock::text(message)]))
     }
 }

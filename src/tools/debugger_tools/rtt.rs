@@ -1,5 +1,4 @@
-use rmcp::{handler::server::tool::Parameters, model::*, tool, tool_router, ErrorData as McpError};
-use std::future::Future;
+use rmcp::{handler::server::wrapper::Parameters, model::*, tool, tool_router, ErrorData as McpError};
 use tracing::{debug, error, info};
 
 use super::formatting::parse_address;
@@ -89,7 +88,7 @@ impl EmbeddedDebuggerToolHandler {
                     );
 
                     info!("RTT attached successfully for session: {}", args.session_id);
-                    Ok(CallToolResult::success(vec![Content::text(message)]))
+                    Ok(CallToolResult::success(vec![ContentBlock::text(message)]))
                 }
                 Err(e) => {
                     error!(
@@ -135,7 +134,7 @@ impl EmbeddedDebuggerToolHandler {
                     );
 
                     info!("RTT detached successfully for session: {}", args.session_id);
-                    Ok(CallToolResult::success(vec![Content::text(message)]))
+                    Ok(CallToolResult::success(vec![ContentBlock::text(message)]))
                 }
                 Err(e) => {
                     error!(
@@ -224,7 +223,7 @@ impl EmbeddedDebuggerToolHandler {
                         "Read {} bytes from RTT channel {} for session: {}",
                         data_len, args.channel, args.session_id
                     );
-                    Ok(CallToolResult::success(vec![Content::text(message)]))
+                    Ok(CallToolResult::success(vec![ContentBlock::text(message)]))
                 }
                 Err(e) => {
                     error!(
@@ -333,7 +332,7 @@ impl EmbeddedDebuggerToolHandler {
                         "Wrote {} bytes to RTT channel {} for session: {}",
                         bytes_written, args.channel, args.session_id
                     );
-                    Ok(CallToolResult::success(vec![Content::text(message)]))
+                    Ok(CallToolResult::success(vec![ContentBlock::text(message)]))
                 }
                 Err(e) => {
                     error!(
@@ -392,7 +391,7 @@ impl EmbeddedDebuggerToolHandler {
                     No RTT channels available.",
                     args.session_id
                 );
-                return Ok(CallToolResult::success(vec![Content::text(message)]));
+                return Ok(CallToolResult::success(vec![ContentBlock::text(message)]));
             }
 
             let mut message = format!("RTT Channels\n\nSession ID: {}\n\n", args.session_id);
@@ -433,7 +432,7 @@ impl EmbeddedDebuggerToolHandler {
                 "Listed {} RTT channels for session: {}",
                 channel_count, args.session_id
             );
-            Ok(CallToolResult::success(vec![Content::text(message)]))
+            Ok(CallToolResult::success(vec![ContentBlock::text(message)]))
         }
     }
 }
